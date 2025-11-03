@@ -6,6 +6,7 @@ import FRP.Yampa
 import Text.Printf (printf)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
+import Data.Maybe (fromMaybe)
 
 type Address = Int
 type Memory = Vector Int
@@ -14,12 +15,15 @@ type Data = Int
 defaultData :: Data
 defaultData = 0
 
-data Instruction a where
-  LoadA :: Address -> Instruction Address
-  Jump :: Address -> Instruction Address
-  Add :: Address -> Instruction Address
-  NoOp :: Instruction ()
-  Out :: Instruction ()
+-- data Instruction where
+--   LoadA :: Address -> Instruction
+--   -- Jump :: Address -> Instruction Address
+--   Add :: Address -> Instruction
+--   NoOp :: Instruction
+--   Out :: Instruction
+
+data Instruction = LoadA | Add | NoOp | Out
+  deriving (Show, Eq)
 
 data MicroInstruction
   = ARegisterIn
@@ -33,38 +37,34 @@ data MicroInstruction
   | RAMOut
   | InstructionRegisterIn
   | InstructionRegisterOut -- only lower 4 bits go to bus
+  deriving (Show, Eq)
 
-fetchInstruction :: [[MicroInstruction]]
-fetchInstruction = [
+fetchInstruction :: Vector [MicroInstruction]
+fetchInstruction = V.fromList [
   [CounterOut, MemoryAddressIn],
-  [RAMOut, InstructionRegisterIn],
-  [CounterEnable]
+  [RAMOut, InstructionRegisterIn, CounterEnable]
   ]
 
 -- does not include fetchInstruction
-loadA :: [[MicroInstruction]]
-loadA = [
+loadA :: Vector [MicroInstruction]
+loadA = V.fromList [
   [InstructionRegisterOut, MemoryAddressIn],
   [RAMOut, ARegisterIn]
   ]
 
-addI :: [[MicroInstruction]]
-addI = [
+addI :: Vector [MicroInstruction]
+addI = V.fromList [
   [InstructionRegisterOut, MemoryAddressIn],
   [RAMOut, BRegisterIn],
   [ALUOut, ARegisterIn]
   ]
 
-outI :: [[MicroInstruction]]
-outI = [[ARegisterOut, OutRegisterIn]]
+outI :: Vector [MicroInstruction]
+outI = V.fromList [[ARegisterOut, OutRegisterIn]]
 
 type Register = SF (Bool, Data) Data
 aRegister :: Register
 aRegister = latch 0
-
-bRegister :: Register
-bRegister = latch 0
-
 
 inputInit :: Applicative f => f ()
 inputInit = pure ()
@@ -148,32 +148,67 @@ pulse t1 t2 = proc x -> do
 -- signal :: SF a Bool
 -- signal = isEvent <$> repeatedly 1.0 ()
 
-signal :: SF a (Bool, Data, Data, Data, Data, Data)
+getInstructionAddress :: Data -> Address
+getInstructionAddress d = d `mod` 16 -- lower 4 bits
+
+getInstruction :: Data -> Instruction
+getInstruction n = case n `div` 16 of
+  1 -> LoadA
+  2 -> Add
+  3 -> Out
+  _ -> NoOp
+
+mkLoadA :: Address -> Data
+mkLoadA addr = 1 * 16 + addr
+
+mkAdd :: Address -> Data
+mkAdd addr = 2 * 16 + addr
+
+mkOut :: Data
+mkOut = 3 * 16
+
+getMicroInstructions :: Instruction -> Vector [MicroInstruction]
+getMicroInstructions i = fetchInstruction <> case i of
+  LoadA -> loadA
+  Add -> addI
+  NoOp -> mempty
+  Out -> outI
+
+
+signal :: SF a (Data, Data, Data, Address, [MicroInstruction])
 signal = proc _ -> do
   c <- clock 1.0 -< ()
-  microInstruction <- microCounter -< c
-  let addrIn = microInstruction == 0
-  let countOut = microInstruction == 0
-  let ramOut = microInstruction == 1
-  let iIn = microInstruction == 1
-  let countEnable = microInstruction == 2
-  let mIn = False
-  let aIn = False
-  let outIn = False
+  microN <- microCounter -< c
   rec
+    let instructionList' = getMicroInstructions (getInstruction instruction)
+    instructionList <- iPre (getMicroInstructions NoOp) -< instructionList' --provide base case
+    let microInsts = fromMaybe [] $ instructionList V.!? microN
+    let addrIn = MemoryAddressIn `elem` microInsts
+    let countOut = CounterOut `elem` microInsts
+    let ramOut = RAMOut `elem` microInsts
+    let iIn = InstructionRegisterIn `elem` microInsts
+    let iOut = InstructionRegisterOut `elem` microInsts
+    let countEnable = CounterEnable `elem` microInsts
+    let mIn = False
+    let aIn = ARegisterIn `elem` microInsts
+    let aOut = ARegisterOut `elem` microInsts
+    let outIn = OutRegisterIn `elem` microInsts
     let bus
           | countOut = n
           -- | addrOut = addr
           | ramOut = m
+          | iOut = getInstructionAddress instruction
+          | aOut = a
           | otherwise = 0
-    n <- counter -< countEnable && c
-    instruction <- aRegister -< (iIn && c, bus)
+    --bus <- iPre 0 -< bus'
+    n <- counter -< countEnable && c -- counter
+    instruction <- aRegister -< (iIn && c, bus) -- instruction register
     addr <- aRegister -< (addrIn && c, bus) -- address register
-    m <- ram (V.fromList [1, 2, 3, 4]) -< (mIn, addr, bus)
+    m <- ram (V.fromList [mkLoadA 3, mkOut, 0, 5, 6]) -< (mIn, addr, bus) -- ram
     a <- aRegister -< (aIn && c, bus) -- A register
     out <- aRegister -< (outIn && c, bus) -- out register
 
-  returnA -< (c, n, instruction, microInstruction, addr, m)
+  returnA -< (out, a, addr, m, microInsts)
 
 class ShowLevel a where
   nLevel :: a -> Int
@@ -197,6 +232,6 @@ showWithTime f (t, a) = showTime t <> ": " <> f a
 
 test :: IO ()
 test = do
-  putStr . unlines . fmap (showWithTime show) $ embed (time &&& signal) $ deltaEncode 0.2 (replicate 120 False)
+  putStr . unlines . fmap (showWithTime show) $ embed (time &&& signal) $ deltaEncode 0.5 (replicate 40 False)
 
 main = test
