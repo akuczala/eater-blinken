@@ -22,7 +22,7 @@ defaultData = 0
 --   NoOp :: Instruction
 --   Out :: Instruction
 
-data Instruction = LoadA | Add | NoOp | Out
+data Instruction = LoadA | Add | NoOp | Out | Halt
   deriving (Show, Eq)
 
 data MicroInstruction
@@ -156,7 +156,8 @@ getInstruction n = case n `div` 16 of
   1 -> LoadA
   2 -> Add
   3 -> Out
-  _ -> NoOp
+  0 -> NoOp
+  _ -> Halt
 
 mkLoadA :: Address -> Data
 mkLoadA addr = 1 * 16 + addr
@@ -167,13 +168,20 @@ mkAdd addr = 2 * 16 + addr
 mkOut :: Data
 mkOut = 3 * 16
 
-getMicroInstructions :: Instruction -> Vector [MicroInstruction]
-getMicroInstructions i = fetchInstruction <> case i of
-  LoadA -> loadA
-  Add -> addI
-  NoOp -> mempty
-  Out -> outI
+mkHalt :: Data
+mkHalt = 4 * 16
 
+getMicroInstructions :: Instruction -> Vector [MicroInstruction]
+getMicroInstructions i = case i of
+  Halt -> mempty
+  _ -> fetchInstruction <> case i of
+    LoadA -> loadA
+    Add -> addI
+    NoOp -> mempty
+    Out -> outI
+
+initialMemory :: Memory
+initialMemory = V.fromList [mkLoadA 4, mkAdd 5, mkOut, mkHalt, 5, 6]
 
 signal :: SF a (Data, Data, Data, Address, [MicroInstruction])
 signal = proc _ -> do
@@ -183,29 +191,29 @@ signal = proc _ -> do
     let instructionList' = getMicroInstructions (getInstruction instruction)
     instructionList <- iPre (getMicroInstructions NoOp) -< instructionList' --provide base case
     let microInsts = fromMaybe [] $ instructionList V.!? microN
-    let addrIn = MemoryAddressIn `elem` microInsts
-    let countOut = CounterOut `elem` microInsts
-    let ramOut = RAMOut `elem` microInsts
-    let iIn = InstructionRegisterIn `elem` microInsts
-    let iOut = InstructionRegisterOut `elem` microInsts
-    let countEnable = CounterEnable `elem` microInsts
+    let enabled = (`elem` microInsts)
+    let addrIn = enabled MemoryAddressIn
+    let iIn = enabled InstructionRegisterIn
+    let countEnable = enabled CounterEnable
     let mIn = False
-    let aIn = ARegisterIn `elem` microInsts
-    let aOut = ARegisterOut `elem` microInsts
-    let outIn = OutRegisterIn `elem` microInsts
+    let aIn = enabled ARegisterIn
+    let bIn = enabled BRegisterIn
+    let outIn = enabled OutRegisterIn
     let bus
-          | countOut = n
+          | enabled CounterOut = n
           -- | addrOut = addr
-          | ramOut = m
-          | iOut = getInstructionAddress instruction
-          | aOut = a
+          | enabled RAMOut = m
+          | enabled InstructionRegisterOut = getInstructionAddress instruction
+          | enabled ARegisterOut = a
+          | enabled ALUOut = s
           | otherwise = 0
-    --bus <- iPre 0 -< bus'
     n <- counter -< countEnable && c -- counter
     instruction <- aRegister -< (iIn && c, bus) -- instruction register
     addr <- aRegister -< (addrIn && c, bus) -- address register
-    m <- ram (V.fromList [mkLoadA 3, mkOut, 0, 5, 6]) -< (mIn, addr, bus) -- ram
+    m <- ram initialMemory -< (mIn && c, addr, bus) -- ram
     a <- aRegister -< (aIn && c, bus) -- A register
+    b <- aRegister -< (bIn && c, bus) -- B register
+    s <- iPre 0 -< a + b -- need to introduce delay on sum
     out <- aRegister -< (outIn && c, bus) -- out register
 
   returnA -< (out, a, addr, m, microInsts)
@@ -232,6 +240,6 @@ showWithTime f (t, a) = showTime t <> ": " <> f a
 
 test :: IO ()
 test = do
-  putStr . unlines . fmap (showWithTime show) $ embed (time &&& signal) $ deltaEncode 0.5 (replicate 40 False)
+  putStr . unlines . fmap (showWithTime show) $ embed (time &&& signal) $ deltaEncode 0.5 (replicate 100 False)
 
 main = test
