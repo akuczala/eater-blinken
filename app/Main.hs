@@ -18,7 +18,7 @@ defaultData = 0
 data Instruction = LoadA Address | StoreA Address | Add Address | NoOp | Out | Halt | Jump Address
   deriving (Show, Eq)
 
-data MicroInstruction
+data ControlSignal
   = ARegisterIn
   | ARegisterOut
   | BRegisterIn
@@ -34,34 +34,34 @@ data MicroInstruction
   | JumpFlag
   deriving (Show, Eq)
 
-fetchInstruction :: Vector [MicroInstruction]
+type MicroInstruction = [ControlSignal]
+
+fetchInstruction :: Vector MicroInstruction
 fetchInstruction = V.fromList [
   [CounterOut, MemoryAddressIn],
   [RAMOut, InstructionRegisterIn, CounterEnable]
   ]
 
 -- does not include fetchInstruction
-loadA :: Vector [MicroInstruction]
+loadA :: Vector MicroInstruction
 loadA = V.fromList [
   [InstructionRegisterOut, MemoryAddressIn],
   [RAMOut, ARegisterIn]
   ]
 
-storeA :: Vector [MicroInstruction]
+storeA :: Vector MicroInstruction
 storeA = V.fromList [
   [InstructionRegisterOut, MemoryAddressIn],
   [ARegisterOut, RAMIn]
   ]
 
-addI :: Vector [MicroInstruction]
+addI :: Vector MicroInstruction
 addI = V.fromList [
   [InstructionRegisterOut, MemoryAddressIn],
   [RAMOut, BRegisterIn],
   [ALUOut, ARegisterIn]
   ]
 
-outI :: Vector [MicroInstruction]
-outI = V.fromList [[ARegisterOut, OutRegisterIn]]
 
 type Register = SF (Bool, Data) Data
 aRegister :: Register
@@ -184,7 +184,7 @@ encodeInstruction i = let
     Halt -> combine 5 0
     Jump addr -> combine 6 addr
 
-getMicroInstructions :: Instruction -> Vector [MicroInstruction]
+getMicroInstructions :: Instruction -> Vector MicroInstruction
 getMicroInstructions i = case i of
   Halt -> mempty
   _ -> fetchInstruction <> case i of
@@ -192,23 +192,35 @@ getMicroInstructions i = case i of
     StoreA _ -> storeA
     Add _ -> addI
     NoOp -> mempty
-    Out -> outI
+    Out -> V.fromList [[ARegisterOut, OutRegisterIn]]
     Jump _ -> V.fromList [[InstructionRegisterOut, JumpFlag]]
 
 instructions :: [Instruction]
 instructions = [LoadA 5, Add 5, Out, StoreA 5, Jump 0]
+
 initialMemory :: Memory
 initialMemory = V.fromList $ (encodeInstruction <$> instructions) <> [1]
 
-signal :: SF a (Data, Address, Instruction, [MicroInstruction])
+
+data CPUState = CPUState {
+  cpuA :: Data,
+  cpuOut :: Data,
+  cpuCounter :: Data,
+  cpuBus :: Data,
+  cpuMicro :: MicroInstruction,
+  cpuInstruction :: Data
+}
+  deriving Show
+
+signal :: SF a CPUState
 signal = proc _ -> do
   c <- clock 1.0 -< ()
   microN <- microCounter -< c
   rec
     let instructionList' = getMicroInstructions (decodeInstruction instruction)
     instructionList <- iPre (getMicroInstructions NoOp) -< instructionList' --provide base case
-    let microInsts = fromMaybe [] $ instructionList V.!? microN
-    let enabled = (`elem` microInsts)
+    let microInst = fromMaybe [] $ instructionList V.!? microN
+    let enabled = (`elem` microInst)
     let addrIn = enabled MemoryAddressIn
     let iIn = enabled InstructionRegisterIn
     let ramIn = enabled RAMIn
@@ -231,7 +243,7 @@ signal = proc _ -> do
     s <- iPre 0 -< a + b -- need to introduce delay on sum
     out <- aRegister -< (outIn && c, bus) -- out register
 
-  returnA -< (out, n, decodeInstruction instruction, microInsts)
+  returnA -< CPUState {cpuA=a, cpuOut=out, cpuCounter=n, cpuBus = bus, cpuMicro=microInst, cpuInstruction=instruction}
 
 class ShowLevel a where
   nLevel :: a -> Int
