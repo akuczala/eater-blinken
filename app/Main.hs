@@ -15,14 +15,7 @@ type Data = Int
 defaultData :: Data
 defaultData = 0
 
--- data Instruction where
---   LoadA :: Address -> Instruction
---   -- Jump :: Address -> Instruction Address
---   Add :: Address -> Instruction
---   NoOp :: Instruction
---   Out :: Instruction
-
-data Instruction = LoadA | Add | NoOp | Out | Halt
+data Instruction = LoadA Address | StoreA Address | Add Address | NoOp | Out | Halt | Jump Address
   deriving (Show, Eq)
 
 data MicroInstruction
@@ -34,9 +27,11 @@ data MicroInstruction
   | CounterOut
   | CounterEnable
   | MemoryAddressIn
+  | RAMIn
   | RAMOut
   | InstructionRegisterIn
   | InstructionRegisterOut -- only lower 4 bits go to bus
+  | JumpFlag
   deriving (Show, Eq)
 
 fetchInstruction :: Vector [MicroInstruction]
@@ -50,6 +45,12 @@ loadA :: Vector [MicroInstruction]
 loadA = V.fromList [
   [InstructionRegisterOut, MemoryAddressIn],
   [RAMOut, ARegisterIn]
+  ]
+
+storeA :: Vector [MicroInstruction]
+storeA = V.fromList [
+  [InstructionRegisterOut, MemoryAddressIn],
+  [ARegisterOut, RAMIn]
   ]
 
 addI :: Vector [MicroInstruction]
@@ -87,6 +88,17 @@ counter = edge >>> accumHoldBy (\b _ -> b + 1) 0
 
 cycleCounter :: Int -> SF Bool Int
 cycleCounter resetAt = edge >>> accumHoldBy (\b _ -> (b + 1) `mod` resetAt) 0
+
+counterRegister :: SF (Bool, Bool, Bool, Int) Int
+counterRegister = let
+    adapter (cl, inc, w, d) = (cl, (inc, w, d)) -- adapt to fLatch input
+    update_ i (inc, w, d) = case (inc, w) of
+      (True, False) -> i + 1
+      (_, True) -> d
+      _ -> i
+  in
+    arr adapter >>> fLatch update_ defaultData
+
 
 maxMicroCycles :: Int
 maxMicroCycles = 5
@@ -143,80 +155,83 @@ pulse t1 t2 = proc x -> do
 --   d <- ram (V.fromList [1, 2]) -< (w, if r then 1 else 0, if wVal then 4 else 5)
 --   returnA -< (w, r, wVal, d)
 
--- signal :: SF a Bool
--- signal = pulse 1.0 2.0
--- signal :: SF a Bool
--- signal = isEvent <$> repeatedly 1.0 ()
-
 getInstructionAddress :: Data -> Address
 getInstructionAddress d = d `mod` 16 -- lower 4 bits
 
-getInstruction :: Data -> Instruction
-getInstruction n = case n `div` 16 of
-  1 -> LoadA
-  2 -> Add
-  3 -> Out
-  0 -> NoOp
-  _ -> Halt
+decodeInstruction :: Data -> Instruction
+decodeInstruction n = let
+  lower = n `mod` 16
+  upper = n `div` 16
+  in case upper of
+    1 -> LoadA lower
+    2 -> Add lower
+    3 -> Out
+    4 -> StoreA lower
+    0 -> NoOp
+    5 -> Halt
+    6 -> Jump lower
+    _ -> Halt
 
-mkLoadA :: Address -> Data
-mkLoadA addr = 1 * 16 + addr
-
-mkAdd :: Address -> Data
-mkAdd addr = 2 * 16 + addr
-
-mkOut :: Data
-mkOut = 3 * 16
-
-mkHalt :: Data
-mkHalt = 4 * 16
+encodeInstruction :: Instruction -> Data
+encodeInstruction i = let
+  combine upper lower = upper * 16 + lower
+  in case i of
+    LoadA addr -> combine 1 addr
+    Add addr -> combine 2 addr
+    Out -> combine 3 0
+    StoreA addr -> combine 4 addr
+    NoOp -> combine 0 0
+    Halt -> combine 5 0
+    Jump addr -> combine 6 addr
 
 getMicroInstructions :: Instruction -> Vector [MicroInstruction]
 getMicroInstructions i = case i of
   Halt -> mempty
   _ -> fetchInstruction <> case i of
-    LoadA -> loadA
-    Add -> addI
+    LoadA _ -> loadA
+    StoreA _ -> storeA
+    Add _ -> addI
     NoOp -> mempty
     Out -> outI
+    Jump _ -> V.fromList [[InstructionRegisterOut, JumpFlag]]
 
+instructions :: [Instruction]
+instructions = [LoadA 5, Add 5, Out, StoreA 5, Jump 0]
 initialMemory :: Memory
-initialMemory = V.fromList [mkLoadA 4, mkAdd 5, mkOut, mkHalt, 5, 6]
+initialMemory = V.fromList $ (encodeInstruction <$> instructions) <> [1]
 
-signal :: SF a (Data, Data, Data, Address, [MicroInstruction])
+signal :: SF a (Data, Address, Instruction, [MicroInstruction])
 signal = proc _ -> do
   c <- clock 1.0 -< ()
   microN <- microCounter -< c
   rec
-    let instructionList' = getMicroInstructions (getInstruction instruction)
+    let instructionList' = getMicroInstructions (decodeInstruction instruction)
     instructionList <- iPre (getMicroInstructions NoOp) -< instructionList' --provide base case
     let microInsts = fromMaybe [] $ instructionList V.!? microN
     let enabled = (`elem` microInsts)
     let addrIn = enabled MemoryAddressIn
     let iIn = enabled InstructionRegisterIn
-    let countEnable = enabled CounterEnable
-    let mIn = False
+    let ramIn = enabled RAMIn
     let aIn = enabled ARegisterIn
     let bIn = enabled BRegisterIn
     let outIn = enabled OutRegisterIn
     let bus
           | enabled CounterOut = n
-          -- | addrOut = addr
           | enabled RAMOut = m
           | enabled InstructionRegisterOut = getInstructionAddress instruction
           | enabled ARegisterOut = a
           | enabled ALUOut = s
           | otherwise = 0
-    n <- counter -< countEnable && c -- counter
+    n <- counterRegister -< (c, enabled CounterEnable, enabled JumpFlag, bus) -- counter
     instruction <- aRegister -< (iIn && c, bus) -- instruction register
     addr <- aRegister -< (addrIn && c, bus) -- address register
-    m <- ram initialMemory -< (mIn && c, addr, bus) -- ram
+    m <- ram initialMemory -< (ramIn && c, addr, bus) -- ram
     a <- aRegister -< (aIn && c, bus) -- A register
     b <- aRegister -< (bIn && c, bus) -- B register
     s <- iPre 0 -< a + b -- need to introduce delay on sum
     out <- aRegister -< (outIn && c, bus) -- out register
 
-  returnA -< (out, a, addr, m, microInsts)
+  returnA -< (out, n, decodeInstruction instruction, microInsts)
 
 class ShowLevel a where
   nLevel :: a -> Int
@@ -240,6 +255,6 @@ showWithTime f (t, a) = showTime t <> ": " <> f a
 
 test :: IO ()
 test = do
-  putStr . unlines . fmap (showWithTime show) $ embed (time &&& signal) $ deltaEncode 0.5 (replicate 100 False)
+  putStr . unlines . fmap (showWithTime show) $ embed (time &&& signal) $ deltaEncode 0.5 (replicate 400 False)
 
 main = test
