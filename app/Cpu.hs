@@ -132,11 +132,21 @@ getMicroInstructions i = case i of
     Out -> V.fromList [[ARegisterOut, OutRegisterIn]]
     Jump _ -> V.fromList [[InstructionRegisterOut, JumpFlag]]
 
-instructions :: [Instruction]
-instructions = [LoadA 5, Add 5, Out, StoreA 5, Jump 0]
+doublingProgram :: [Instruction]
+doublingProgram = [LoadA 5, Add 5, Out, StoreA 5, Jump 0]
+
+fibProgram :: Int -> Int -> [Instruction]
+fibProgram x y = [
+  LoadA x, Add y, Out, StoreA x,
+  Add y, Out, StoreA y,
+  Jump 0
+  ]
 
 initialMemory :: Memory
-initialMemory = V.fromList $ (encodeInstruction <$> instructions) <> [1]
+initialMemory = let
+  programLen = length $ fibProgram 0 0
+  program = fibProgram programLen (programLen + 1)
+  in V.fromList $ (encodeInstruction <$> program) <> [1, 1]
 
 
 data CPUState = CPUState {

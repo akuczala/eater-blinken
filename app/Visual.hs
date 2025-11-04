@@ -6,7 +6,7 @@ module Visual where
 
 import qualified SDL
 import SDL (Renderer, V2(..), ($=))
-import FRP.Yampa (SF, returnA, iterFrom)
+import FRP.Yampa (SF, returnA)
 import Colors
 import Foreign.C (CInt)
 import Control.Monad.IO.Class (MonadIO)
@@ -32,12 +32,6 @@ firstSample = do
 
 data Frame = Frame {exit :: Bool, mousePos :: V2 CInt}
 
-semiImplicitEuler ::(Double, Double)
-  -> SF (Double -> Double -> Double) (Double, Double)
-semiImplicitEuler = iterFrom go
-  where
-    go f _ dt (x, v) = let vNext = v + f x v * dt in (x + vNext * dt, vNext)
-
 drawBinary :: Renderer -> V2 Int -> CInt -> Int -> Int -> IO ()
 drawBinary renderer p0 size nBits n = mapM_ drawBit [0 .. nBits - 1] where
   drawBit i = do
@@ -47,7 +41,7 @@ drawBinary renderer p0 size nBits n = mapM_ drawBit [0 .. nBits - 1] where
 mkGrid :: Int -> Int -> V.Vector (V2 Double)
 mkGrid m n = V.fromList [
   V2 (i/ fromIntegral m) (j / fromIntegral n)
-  | i <- fromIntegral <$> [0 .. m - 1], j <- fromIntegral <$> [0 .. n - 1]
+  | j <- fromIntegral <$> [0 .. n - 1], i <- fromIntegral <$> [0 .. m - 1]
   ]
 
 output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
@@ -56,27 +50,49 @@ output renderer _ (frame, c, cpuState) = do
   SDL.clear renderer
 
   let bitBoxSize = 20
-  let gridPoints = fmap round . (* V2 800 600) <$> mkGrid 3 3
+  let gridPoints = fmap round . (+ V2 0 50) . (* V2 800 600) <$> mkGrid 3 3
   SDL.rendererDrawColor renderer $= cyan
-  drawBinary renderer (gridPoints V.! 0) bitBoxSize 8 (cpuBus cpuState)
+  drawBinary renderer (gridPoints V.! 1) bitBoxSize 8 (cpuBus cpuState)
 
+  -- A
   SDL.rendererDrawColor renderer $= red
-  drawBinary renderer (gridPoints V.! 4) bitBoxSize 8 (cpuA cpuState)
+  drawBinary renderer (gridPoints V.! 5 + V2 0 (-60)) bitBoxSize 8 (cpuA cpuState)
 
+  -- B
   SDL.rendererDrawColor renderer $= orange
-  drawBinary renderer (gridPoints V.! 5) bitBoxSize 8 (cpuB cpuState)
+  drawBinary renderer (gridPoints V.! 5 + V2 0 60) bitBoxSize 8 (cpuB cpuState)
 
+  -- Alu
   SDL.rendererDrawColor renderer $= magenta
-  drawBinary renderer (gridPoints V.! 6) bitBoxSize 8 (cpuAlu cpuState)
+  drawBinary renderer (gridPoints V.! 5) bitBoxSize 8 (cpuAlu cpuState)
 
+  -- out
   SDL.rendererDrawColor renderer $= yellow
-  drawBinary renderer (gridPoints V.! 1) bitBoxSize 8 (cpuOut cpuState)
+  drawBinary renderer (gridPoints V.! 8) bitBoxSize 8 (cpuOut cpuState)
 
+  -- address
+  SDL.rendererDrawColor renderer $= yellow
+  drawBinary renderer (gridPoints V.! 3) bitBoxSize 4 (cpuAddr cpuState)
+
+  -- memory IO
+  SDL.rendererDrawColor renderer $= red
+  drawBinary renderer (gridPoints V.! 3 + V2 0 60) bitBoxSize 8 (cpuMemory cpuState)
+
+  -- upper 4 instruction
+  SDL.rendererDrawColor renderer $= blue
+  drawBinary renderer (gridPoints V.! 7) bitBoxSize 4 (cpuInstruction cpuState `div` 16)
+
+  -- lower 4 instruction
+  SDL.rendererDrawColor renderer $= yellow
+  drawBinary renderer (gridPoints V.! 7 + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 4 (cpuInstruction cpuState)
+
+  -- program counter
   SDL.rendererDrawColor renderer $= green
   drawBinary renderer (gridPoints V.! 2) bitBoxSize 4 (cpuCounter cpuState)
 
+  -- micro counter
   SDL.rendererDrawColor renderer $= blue
-  drawBinary renderer (gridPoints V.! 3) bitBoxSize 3 (cpuMicroCounter cpuState)
+  drawBinary renderer (gridPoints V.! 2 + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 3 (cpuMicroCounter cpuState)
 
   SDL.present renderer
   return (exit frame)
