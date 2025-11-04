@@ -141,17 +141,21 @@ initialMemory = V.fromList $ (encodeInstruction <$> instructions) <> [1]
 
 data CPUState = CPUState {
   cpuA :: Data,
+  cpuB :: Data,
+  cpuAlu :: Data,
   cpuOut :: Data,
-  cpuCounter :: Data,
+  cpuCounter :: Int,
   cpuBus :: Data,
   cpuMicro :: MicroInstruction,
-  cpuInstruction :: Data
+  cpuMicroCounter :: Int,
+  cpuInstruction :: Data,
+  cpuAddr :: Data,
+  cpuMemory :: Data
 }
   deriving Show
 
-cpuSignal :: SF a CPUState
-cpuSignal = proc _ -> do
-  c <- clock 1.0 -< ()
+cpuSignal :: SF Bool CPUState
+cpuSignal = proc c -> do
   microN <- microCounter -< c
   rec
     let instructionList' = getMicroInstructions (decodeInstruction instruction)
@@ -180,4 +184,15 @@ cpuSignal = proc _ -> do
     s <- iPre 0 -< a + b -- need to introduce delay on sum
     out <- aRegister -< (outIn && c, bus) -- out register
 
-  returnA -< CPUState {cpuA=a, cpuOut=out, cpuCounter=n, cpuBus = bus, cpuMicro=microInst, cpuInstruction=instruction}
+  returnA -< CPUState {
+    cpuA=a,
+    cpuB=b,
+    cpuAlu=s,
+    cpuOut=out,
+    cpuCounter=n,
+    cpuMicroCounter=microN,
+    cpuBus = bus, cpuMicro=microInst,
+    cpuInstruction=instruction,
+    cpuAddr=addr,
+    cpuMemory = m
+    }
