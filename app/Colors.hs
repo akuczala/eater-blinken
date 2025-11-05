@@ -8,6 +8,9 @@ type Color = V4 Word8
 black :: Color
 black = V4 0 0 0 255
 
+white :: Color
+white = V4 255 255 255 255
+
 red :: Color
 red = V4 255 0 0 255
 

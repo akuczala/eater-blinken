@@ -67,7 +67,7 @@ executable yampa-circuits
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.18.3.0, sdl2, Yampa >= 0.15, vector
+    build-depends:    base ^>=4.18.3.0, sdl2, sdl2-gfx, Yampa >= 0.15, vector
 
     -- Directories containing source files.
     hs-source-dirs:   app

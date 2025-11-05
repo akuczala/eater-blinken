@@ -11,10 +11,12 @@ import Colors
 import Foreign.C (CInt)
 import Control.Monad.IO.Class (MonadIO)
 import SDLHelper (sdlApp)
-import Cpu (CPUState (..), cpuSignal, cpuOut)
+import Cpu (CPUState (..), cpuSignal, cpuOut, ControlSignal (..))
 import Signals (clock)
 import Data.Bits (testBit)
 import qualified Data.Vector as V
+import Control.Monad (when)
+import qualified SDL.Primitive
 
 test :: IO ()
 test = sdlApp firstSample handleSDLEvents output signal
@@ -22,15 +24,16 @@ test = sdlApp firstSample handleSDLEvents output signal
 signal :: SF Frame (Frame, Bool, CPUState)
 signal = proc frame -> do
   -- let V2 mouseX mouseY = fromIntegral <$> mousePos frame
-  c <- clock 0.2 -< ()
+  --c <- clock 2.0 -< ()
+  let c = spacePressed frame
   s <- cpuSignal -< c
   returnA -< (frame, c, s)
 
 firstSample :: IO Frame
 firstSample = do
-  return $ Frame {exit = False, mousePos = V2 0 0}
+  return $ Frame {exit = False, mousePos = V2 0 0, spacePressed = False}
 
-data Frame = Frame {exit :: Bool, mousePos :: V2 CInt}
+data Frame = Frame {exit :: Bool, mousePos :: V2 CInt, spacePressed :: Bool}
 
 drawBinary :: Renderer -> V2 Int -> CInt -> Int -> Int -> IO ()
 drawBinary renderer p0 size nBits n = mapM_ drawBit [0 .. nBits - 1] where
@@ -44,55 +47,96 @@ mkGrid m n = V.fromList [
   | j <- fromIntegral <$> [0 .. n - 1], i <- fromIntegral <$> [0 .. m - 1]
   ]
 
+lightRadius = 10
+
+drawLight :: Renderer -> V2 Int -> Color -> Bool -> IO ()
+drawLight renderer pos color enable = do
+  SDL.Primitive.circle renderer (fromIntegral <$> pos) lightRadius white
+  when enable $
+    SDL.Primitive.fillCircle renderer (fromIntegral <$> pos) lightRadius color
+
 output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
 output renderer _ (frame, c, cpuState) = do
+  let enabled controlSignal = controlSignal `elem` cpuMicro cpuState
   SDL.rendererDrawColor renderer $= black
   SDL.clear renderer
 
   let bitBoxSize = 20
-  let gridPoints = fmap round . (+ V2 0 50) . (* V2 800 600) <$> mkGrid 3 3
+  let dotOffset = V2 (-25) 10
+
+  let gridPoints = fmap round . (+ V2 50 50) . (* V2 800 600) <$> mkGrid 3 3
   SDL.rendererDrawColor renderer $= cyan
   drawBinary renderer (gridPoints V.! 1) bitBoxSize 8 (cpuBus cpuState)
 
   -- A
+  let aluPos = gridPoints V.! 5
+  let aPos = aluPos + V2 0 (-60)
   SDL.rendererDrawColor renderer $= red
-  drawBinary renderer (gridPoints V.! 5 + V2 0 (-60)) bitBoxSize 8 (cpuA cpuState)
+  drawBinary renderer aPos bitBoxSize 8 (cpuA cpuState)
+
+  drawLight renderer (aPos + dotOffset) red (enabled ARegisterIn)
+  drawLight renderer (aPos + dotOffset) green (enabled ARegisterOut)
 
   -- B
+  let bPos = aluPos + V2 0 60
   SDL.rendererDrawColor renderer $= orange
-  drawBinary renderer (gridPoints V.! 5 + V2 0 60) bitBoxSize 8 (cpuB cpuState)
+  drawBinary renderer bPos bitBoxSize 8 (cpuB cpuState)
+
+  drawLight renderer (bPos + dotOffset) red (enabled BRegisterIn)
 
   -- Alu
   SDL.rendererDrawColor renderer $= magenta
-  drawBinary renderer (gridPoints V.! 5) bitBoxSize 8 (cpuAlu cpuState)
+  drawBinary renderer aluPos bitBoxSize 8 (cpuAlu cpuState)
+
+  drawLight renderer (aluPos + dotOffset) green (enabled ALUOut)
 
   -- out
-  SDL.rendererDrawColor renderer $= yellow
-  drawBinary renderer (gridPoints V.! 8) bitBoxSize 8 (cpuOut cpuState)
+  let outPos = gridPoints V.! 8
+  SDL.rendererDrawColor renderer $= white
+  drawBinary renderer outPos bitBoxSize 8 (cpuOut cpuState)
+
+  drawLight renderer (outPos + dotOffset) red (enabled OutRegisterIn)
 
   -- address
+  let addrPos = gridPoints V.! 3
   SDL.rendererDrawColor renderer $= yellow
-  drawBinary renderer (gridPoints V.! 3) bitBoxSize 4 (cpuAddr cpuState)
+  drawBinary renderer addrPos bitBoxSize 4 (cpuAddr cpuState)
+
+  drawLight renderer (addrPos + dotOffset) red (enabled MemoryAddressIn)
 
   -- memory IO
+  let memPos = addrPos + V2 0 60
   SDL.rendererDrawColor renderer $= red
-  drawBinary renderer (gridPoints V.! 3 + V2 0 60) bitBoxSize 8 (cpuMemory cpuState)
+  drawBinary renderer memPos bitBoxSize 8 (cpuMemory cpuState)
+
+  drawLight renderer (memPos + dotOffset) red (enabled RAMIn)
+  drawLight renderer (memPos + dotOffset) green (enabled RAMOut)
 
   -- upper 4 instruction
+  let instPos = gridPoints V.! 7
+
   SDL.rendererDrawColor renderer $= blue
-  drawBinary renderer (gridPoints V.! 7) bitBoxSize 4 (cpuInstruction cpuState `div` 16)
+  drawBinary renderer instPos bitBoxSize 4 (cpuInstruction cpuState `div` 16)
 
   -- lower 4 instruction
+
   SDL.rendererDrawColor renderer $= yellow
-  drawBinary renderer (gridPoints V.! 7 + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 4 (cpuInstruction cpuState)
+  drawBinary renderer (instPos + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 4 (cpuInstruction cpuState)
+
+  drawLight renderer (instPos + dotOffset) red (enabled InstructionRegisterIn)
+  drawLight renderer (instPos + dotOffset) green (enabled InstructionRegisterOut)
 
   -- program counter
+  let progPos = gridPoints V.! 2
   SDL.rendererDrawColor renderer $= green
-  drawBinary renderer (gridPoints V.! 2) bitBoxSize 4 (cpuCounter cpuState)
+  drawBinary renderer progPos bitBoxSize 4 (cpuCounter cpuState)
+
+  drawLight renderer (progPos + dotOffset) green (enabled CounterOut)
+  drawLight renderer (progPos + dotOffset) red (enabled JumpFlag)
 
   -- micro counter
   SDL.rendererDrawColor renderer $= blue
-  drawBinary renderer (gridPoints V.! 2 + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 3 (cpuMicroCounter cpuState)
+  drawBinary renderer (progPos + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 3 (cpuMicroCounter cpuState)
 
   SDL.present renderer
   return (exit frame)
@@ -109,5 +153,12 @@ handleSDLEvents = do
             SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
           _ -> False
       qPressed = any eventIsQPress events
+      eventIsSpacePress event =
+        case SDL.eventPayload event of
+          SDL.KeyboardEvent keyboardEvent ->
+            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed &&
+            SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeSpace
+          _ -> False
+      spacePressed = any eventIsSpacePress events
   (SDL.P p) <- SDL.getAbsoluteMouseLocation
-  return $ Just Frame {exit = qPressed, mousePos = p}
+  return $ Just Frame {exit = qPressed, mousePos = p, spacePressed = spacePressed}

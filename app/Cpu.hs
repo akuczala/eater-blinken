@@ -79,7 +79,7 @@ counterRegister = let
 
 
 maxMicroCycles :: Int
-maxMicroCycles = 5
+maxMicroCycles = 4
 -- input to microinstruction counter is inverted
 microCounter :: SF Bool Int
 microCounter = arr not >>> cycleCounter (maxMicroCycles + 1)
