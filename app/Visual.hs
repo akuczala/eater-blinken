@@ -11,12 +11,13 @@ import Colors
 import Foreign.C (CInt)
 import Control.Monad.IO.Class (MonadIO)
 import SDLHelper (sdlApp)
-import Cpu (CPUState (..), cpuSignal, cpuOut, ControlSignal (..), encodeFlags)
+import Cpu (CPUState (..), cpuSignal, cpuOut, ControlSignal (..), encodeFlags, fibProgram, encodeProgram, countDownStop, countDown)
 import Signals (clock)
 import Data.Bits (testBit)
 import qualified Data.Vector as V
 import Control.Monad (when)
 import qualified SDL.Primitive
+import GHC.Bits (Bits)
 
 test :: IO ()
 test = sdlApp firstSample handleSDLEvents output signal
@@ -24,9 +25,9 @@ test = sdlApp firstSample handleSDLEvents output signal
 signal :: SF Frame (Frame, Bool, CPUState)
 signal = proc frame -> do
   -- let V2 mouseX mouseY = fromIntegral <$> mousePos frame
-  --c <- clock 2.0 -< ()
-  let c = spacePressed frame
-  s <- cpuSignal -< c
+  c <- clock 0.2 -< ()
+  --let c = spacePressed frame
+  s <- cpuSignal (encodeProgram countDown) -< c
   returnA -< (frame, c, s)
 
 firstSample :: IO Frame
@@ -35,7 +36,7 @@ firstSample = do
 
 data Frame = Frame {exit :: Bool, mousePos :: V2 CInt, spacePressed :: Bool}
 
-drawBinary :: Renderer -> V2 Int -> CInt -> Int -> Int -> IO ()
+drawBinary :: Bits a => Renderer -> V2 Int -> CInt -> Int -> a -> IO ()
 drawBinary renderer p0 size nBits n = mapM_ drawBit [0 .. nBits - 1] where
   drawBit i = do
       (if n `testBit` i then SDL.fillRect else SDL.drawRect) renderer . Just $
@@ -57,7 +58,7 @@ drawLight renderer pos color enable = do
 
 output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
 output renderer _ (frame, c, cpuState) = do
-  when (spacePressed frame) (print cpuState)
+  --when (spacePressed frame) (print cpuState)
 
   let enabled controlSignal = controlSignal `elem` cpuMicro cpuState
   SDL.rendererDrawColor renderer $= black
@@ -91,6 +92,7 @@ output renderer _ (frame, c, cpuState) = do
   drawBinary renderer aluPos bitBoxSize 8 (cpuAlu cpuState)
 
   drawLight renderer (aluPos + dotOffset) green (enabled ALUOut)
+  drawLight renderer (((`div` 2) <$> aluPos + bPos)  + dotOffset) blue (enabled Subtract)
 
   -- flags
   let flagPos = gridPoints V.! 4

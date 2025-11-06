@@ -8,10 +8,11 @@ import Data.Maybe (fromMaybe)
 import Signals
 import Data.Maybe (catMaybes)
 import Data.Bits (bit, Bits (testBit))
+import Data.Word (Word8)
 
-type Address = Int
-type Memory = Vector Int
-type Data = Int
+type Address = Data
+type Memory = Vector Data
+type Data = Word8
 
 defaultData :: Data
 defaultData = 0
@@ -27,6 +28,7 @@ data Instruction
   | JEZ Address
   | JLZ Address
   | LoadI Data
+  | Sub Data
   deriving (Show, Eq)
 
 data ControlSignal
@@ -34,6 +36,7 @@ data ControlSignal
   | ARegisterOut
   | BRegisterIn
   | ALUOut
+  | Subtract
   | OutRegisterIn
   | CounterOut
   | CounterEnable
@@ -95,34 +98,42 @@ addI = V.fromList [
   [ALUOut, ARegisterIn, FlagRegisterIn]
   ]
 
+subI :: Vector MicroInstruction
+subI = V.fromList [
+  [InstructionRegisterOut, MemoryAddressIn],
+  [RAMOut, BRegisterIn],
+  [ALUOut, ARegisterIn, FlagRegisterIn, Subtract]
+  ]
+
 type Register = SF (Bool, Data) Data
 
 aRegister :: Register
 aRegister = latch 0
 
 
-counterRegister :: SF (Bool, Bool, Bool, Int) Int
-counterRegister = let
+counterRegister :: Num a => a -> SF (Bool, Bool, Bool, a) a
+counterRegister defaultVal = let
     adapter (cl, inc, w, d) = (cl, (inc, w, d)) -- adapt to fLatch input
     update_ i (inc, w, d) = case (inc, w) of
       (True, False) -> i + 1
       (_, True) -> d
       _ -> i
   in
-    arr adapter >>> fLatch update_ defaultData
+    arr adapter >>> fLatch update_ defaultVal
 
 
-maxMicroCycles :: Int
+maxMicroCycles :: Data
 maxMicroCycles = 4
 -- input to microinstruction counter is inverted
-microCounter :: SF Bool Int
+microCounter :: SF Bool Data
 microCounter = arr not >>> cycleCounter (maxMicroCycles + 1)
 
 -- True if writing
 ram :: Memory -> SF (Bool, Address, Data) Data
 ram initContents = proc (write, addr, dat) -> do
-  memory <- fLatch f initContents -< (write, (addr, dat))
-  returnA -< memory V.! addr
+  let iAddr = fromIntegral addr
+  memory <- fLatch f initContents -< (write, (iAddr, dat))
+  returnA -< memory V.! iAddr
   where
     f m (a, d) = m V.// [(a, d)]
 
@@ -144,6 +155,7 @@ decodeInstruction n = let
     7 -> JEZ lower
     8 -> JLZ lower
     9 -> LoadI lower
+    10 -> Sub lower
     _ -> Halt
 
 encodeInstruction :: Instruction -> Data
@@ -160,6 +172,7 @@ encodeInstruction i = let
     JEZ addr -> combine 7 addr
     JLZ addr -> combine 8 addr
     LoadI dat -> combine 9 dat
+    Sub addr -> combine 10 addr
 
 getMicroInstructions :: [Flag] -> Instruction -> Vector MicroInstruction
 getMicroInstructions flags i = case i of
@@ -176,13 +189,14 @@ getMicroInstructions flags i = case i of
     LoadI _ -> V.fromList [
       [InstructionRegisterOut, ARegisterIn]
       ]
+    Sub _ -> subI
     where
       jumpInstructions doJump = V.fromList [[InstructionRegisterOut] <> ([JumpSignal | doJump])]
 
-doublingProgram :: Int -> [Instruction]
+doublingProgram :: Address -> [Instruction]
 doublingProgram x = [LoadI 1, StoreA x, LoadA x, Add x, Out, StoreA x, Jump 0]
 
-fibProgram :: Int -> Int -> [Instruction]
+fibProgram :: Address -> Address -> [Instruction]
 fibProgram x y = [
   LoadI 1, StoreA x, StoreA y,
   LoadA x, Add y, Out, StoreA x,
@@ -190,39 +204,40 @@ fibProgram x y = [
   Jump 3
   ]
 
-countDown :: Int -> Int -> [Instruction]
+countDown :: Address -> Address -> [Instruction]
 countDown x y = [
-  LoadI (-1),
+  LoadI 1,
   StoreA x,
   LoadI 3,
   StoreA y,
-  Add x, -- 4
+  Sub x, -- 4
   Out,
   JEZ 8,
   Jump 4,
   LoadI 1, -- 8
   Add y,
+  StoreA y,
   Jump 4
   ]
 
-countDownStop :: Int -> Int -> [Instruction]
+countDownStop :: Address -> Address -> [Instruction]
 countDownStop x y = [
-  LoadI (-1),
+  LoadI 1,
   StoreA x,
   LoadI 5,
   StoreA y,
-  Add x, -- 4
+  Sub x, -- 4
   Out,
   JEZ 8,
   Jump 4,
   Halt -- 8
   ]
 
-initialMemory :: Memory
-initialMemory = let
-  programLen = length $ countDownStop 0 0
-  program = countDownStop programLen (programLen + 1)
-  in V.fromList $ (encodeInstruction <$> program) <> [0, 0]
+encodeProgram :: (Address -> Address -> [Instruction]) -> Memory
+encodeProgram program = let
+  programLen = fromIntegral . length $ program 0 0
+  prog = program programLen (programLen + 1)
+  in V.fromList $ (encodeInstruction <$> prog) <> [0, 0]
 
 
 data CPUState = CPUState {
@@ -230,10 +245,10 @@ data CPUState = CPUState {
   cpuB :: Data,
   cpuAlu :: Data,
   cpuOut :: Data,
-  cpuCounter :: Int,
+  cpuCounter :: Data,
   cpuBus :: Data,
   cpuMicro :: MicroInstruction,
-  cpuMicroCounter :: Int,
+  cpuMicroCounter :: Data,
   cpuInstruction :: Data,
   cpuAddr :: Data,
   cpuMemory :: Data,
@@ -241,13 +256,13 @@ data CPUState = CPUState {
 }
   deriving Show
 
-cpuSignal :: SF Bool CPUState
-cpuSignal = proc c -> do
+cpuSignal :: Memory -> SF Bool CPUState
+cpuSignal initialMemory = proc c -> do
   microN <- microCounter -< c
   rec
     let instructionList' = getMicroInstructions flags (decodeInstruction instruction)
     instructionList <- iPre (getMicroInstructions [] NoOp) -< instructionList' --provide base case
-    let microInst = fromMaybe [] $ instructionList V.!? microN
+    let microInst = fromMaybe [] $ instructionList V.!? fromIntegral microN
     let enabled = (`elem` microInst)
     let addrIn = enabled MemoryAddressIn
     let iIn = enabled InstructionRegisterIn
@@ -262,13 +277,14 @@ cpuSignal = proc c -> do
           | enabled ARegisterOut = a
           | enabled ALUOut = s
           | otherwise = 0
-    n <- counterRegister -< (c, enabled CounterEnable, enabled JumpSignal, bus) -- counter
+    n <- counterRegister defaultData -< (c, enabled CounterEnable, enabled JumpSignal, bus) -- counter
     instruction <- aRegister -< (iIn && c, bus) -- instruction register
     addr <- aRegister -< (addrIn && c, bus) -- address register
     m <- ram initialMemory -< (ramIn && c, addr, bus) -- ram
     a <- aRegister -< (aIn && c, bus) -- A register
     b <- aRegister -< (bIn && c, bus) -- B register
-    s <- iPre 0 -< a + b -- need to introduce delay on sum
+    let b' = if enabled Subtract then -b else b
+    s <- iPre 0 -< a + b' -- need to introduce delay on sum
     flags <- arr decodeFlags <<< aRegister -< (enabled FlagRegisterIn && c, encodeFlags $ getFlags s)
     out <- aRegister -< (outIn && c, bus) -- out register
 

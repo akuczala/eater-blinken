@@ -17,10 +17,10 @@ clock :: Time -> SF a Bool
 clock t = accumHoldBy s False <<< repeatedly t () where
   s x _ = not x
 
-counter :: SF Bool Int
+counter :: Num a => SF Bool a
 counter = edge >>> accumHoldBy (\b _ -> b + 1) 0
 
-cycleCounter :: Int -> SF Bool Int
+cycleCounter :: Integral a => a -> SF Bool a
 cycleCounter resetAt = edge >>> accumHoldBy (\b _ -> (b + 1) `mod` resetAt) 0
 
 fLatch :: (b -> a -> b) -> b -> SF (Bool, a) b
