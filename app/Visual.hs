@@ -11,7 +11,7 @@ import Colors
 import Foreign.C (CInt)
 import Control.Monad.IO.Class (MonadIO)
 import SDLHelper (sdlApp)
-import Cpu (CPUState (..), cpuSignal, cpuOut, ControlSignal (..))
+import Cpu (CPUState (..), cpuSignal, cpuOut, ControlSignal (..), encodeFlags)
 import Signals (clock)
 import Data.Bits (testBit)
 import qualified Data.Vector as V
@@ -57,6 +57,8 @@ drawLight renderer pos color enable = do
 
 output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
 output renderer _ (frame, c, cpuState) = do
+  when (spacePressed frame) (print cpuState)
+
   let enabled controlSignal = controlSignal `elem` cpuMicro cpuState
   SDL.rendererDrawColor renderer $= black
   SDL.clear renderer
@@ -89,6 +91,12 @@ output renderer _ (frame, c, cpuState) = do
   drawBinary renderer aluPos bitBoxSize 8 (cpuAlu cpuState)
 
   drawLight renderer (aluPos + dotOffset) green (enabled ALUOut)
+
+  -- flags
+  let flagPos = gridPoints V.! 4
+  SDL.rendererDrawColor renderer $= orange
+  drawBinary renderer flagPos bitBoxSize 2 (encodeFlags $ cpuFlags cpuState)
+  drawLight renderer (flagPos + dotOffset) red (enabled FlagRegisterIn)
 
   -- out
   let outPos = gridPoints V.! 8
@@ -132,7 +140,7 @@ output renderer _ (frame, c, cpuState) = do
   drawBinary renderer progPos bitBoxSize 4 (cpuCounter cpuState)
 
   drawLight renderer (progPos + dotOffset) green (enabled CounterOut)
-  drawLight renderer (progPos + dotOffset) red (enabled JumpFlag)
+  drawLight renderer (progPos + dotOffset) red (enabled JumpSignal)
 
   -- micro counter
   SDL.rendererDrawColor renderer $= blue
