@@ -1,7 +1,8 @@
 module Main where
+
+import Cpu (cpuSignal)
 import FRP.Yampa
 import Text.Printf (printf)
-import Cpu (cpuSignal)
 import Visual (test)
 
 -- signal :: SF a Int
@@ -21,7 +22,6 @@ import Visual (test)
 --   d <- ram (V.fromList [1, 2]) -< (w, if r then 1 else 0, if wVal then 4 else 5)
 --   returnA -< (w, r, wVal, d)
 
-
 class ShowLevel a where
   nLevel :: a -> Int
   showLevel :: a -> String
@@ -34,7 +34,6 @@ instance ShowLevel Bool where
 instance ShowLevel Int where
   nLevel 0 = 0
   nLevel n = n
-
 
 showTime :: Time -> String
 showTime = printf "%.2f"

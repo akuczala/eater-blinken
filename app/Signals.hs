@@ -1,12 +1,14 @@
 {-# LANGUAGE Arrows #-}
 
 module Signals where
-import FRP.Yampa
-import Data.Vector
 
+import Data.Vector
+import FRP.Yampa
 
 type Address = Data
+
 type Memory = Vector Data
+
 type Data = Word
 
 defaultData :: Data
@@ -22,26 +24,29 @@ pulse t1 t2 = proc x -> do
   returnA -< b1 && not b2
 
 clock :: Time -> SF a Bool
-clock t = accumHoldBy s False <<< repeatedly t () where
-  s x _ = not x
+clock t = accumHoldBy s False <<< repeatedly t ()
+  where
+    s x _ = not x
 
-counter :: Num a => SF Bool a
+counter :: (Num a) => SF Bool a
 counter = edge >>> accumHoldBy (\b _ -> b + 1) 0
 
-cycleCounter :: Integral a => a -> SF Bool a
+cycleCounter :: (Integral a) => a -> SF Bool a
 cycleCounter resetAt = edge >>> accumHoldBy (\b _ -> (b + 1) `mod` resetAt) 0
 
 fLatch :: (b -> a -> b) -> b -> SF (Bool, a) b
-fLatch f init_ = stuff >>> accumHoldBy f init_ where
-  stuff = proc (c, a) -> do
-    e <- edge -< c
-    returnA -< fmap (const a) e
+fLatch f init_ = stuff >>> accumHoldBy f init_
+  where
+    stuff = proc (c, a) -> do
+      e <- edge -< c
+      returnA -< fmap (const a) e
 
 latch :: a -> SF (Bool, a) a
-latch init_ = stuff >>> accumHoldBy (\_ a -> a) init_ where
-  stuff = proc (c, a) -> do
-    e <- edge -< c
-    returnA -< fmap (const a) e
+latch init_ = stuff >>> accumHoldBy (\_ a -> a) init_
+  where
+    stuff = proc (c, a) -> do
+      e <- edge -< c
+      returnA -< fmap (const a) e
 
 unEdge :: SF (Event ()) Bool
 unEdge = arr (fmap (const not)) >>> accumHold False

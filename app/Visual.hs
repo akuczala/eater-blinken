@@ -1,25 +1,25 @@
 {-# LANGUAGE Arrows #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LinearTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Visual where
 
-import qualified SDL
-import SDL (Renderer, V2(..), ($=))
-import FRP.Yampa (SF, returnA)
 import Colors
-import Foreign.C (CInt)
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO)
-import SDLHelper (sdlApp)
 import Cpu
-import Signals (clock)
 import Data.Bits (testBit)
 import qualified Data.Vector as V
-import Control.Monad (when)
-import qualified SDL.Primitive
+import FRP.Yampa (SF, returnA)
+import Foreign.C (CInt)
 import GHC.Bits (Bits)
 import Instructions
 import Programs
+import SDL (Renderer, V2 (..), ($=))
+import qualified SDL
+import qualified SDL.Primitive
+import SDLHelper (sdlApp)
+import Signals (clock)
 
 test :: IO ()
 test = sdlApp firstSample handleSDLEvents output signal
@@ -27,7 +27,7 @@ test = sdlApp firstSample handleSDLEvents output signal
 signal :: SF Frame (Frame, Bool, CPUState)
 signal = proc frame -> do
   -- let V2 mouseX mouseY = fromIntegral <$> mousePos frame
-  --c <- clock 0.2 -< ()
+  -- c <- clock 0.2 -< ()
   let c = spacePressed frame
   s <- cpuSignal (encodeProgram countDown) -< c
   returnA -< (frame, c, s)
@@ -38,17 +38,20 @@ firstSample = do
 
 data Frame = Frame {exit :: Bool, mousePos :: V2 CInt, spacePressed :: Bool}
 
-drawBinary :: Bits a => Renderer -> V2 Int -> CInt -> Int -> a -> IO ()
-drawBinary renderer p0 size nBits n = mapM_ drawBit [0 .. nBits - 1] where
-  drawBit i = do
+drawBinary :: (Bits a) => Renderer -> V2 Int -> CInt -> Int -> a -> IO ()
+drawBinary renderer p0 size nBits n = mapM_ drawBit [0 .. nBits - 1]
+  where
+    drawBit i = do
       (if n `testBit` i then SDL.fillRect else SDL.drawRect) renderer . Just $
         SDL.Rectangle (SDL.P $ fromIntegral <$> p0 + V2 (((nBits - 1) - i) * (fromIntegral size + 5)) 0) (V2 size size)
 
 mkGrid :: Int -> Int -> V.Vector (V2 Double)
-mkGrid m n = V.fromList [
-  V2 (i/ fromIntegral m) (j / fromIntegral n)
-  | j <- fromIntegral <$> [0 .. n - 1], i <- fromIntegral <$> [0 .. m - 1]
-  ]
+mkGrid m n =
+  V.fromList
+    [ V2 (i / fromIntegral m) (j / fromIntegral n)
+    | j <- fromIntegral <$> [0 .. n - 1],
+      i <- fromIntegral <$> [0 .. m - 1]
+    ]
 
 lightRadius = 10
 
@@ -60,7 +63,7 @@ drawLight renderer pos color enable = do
 
 output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
 output renderer _ (frame, c, cpuState) = do
-  --when (spacePressed frame) (print cpuState)
+  -- when (spacePressed frame) (print cpuState)
 
   let enabled controlSignal = controlSignal `elem` cpuMicro cpuState
   SDL.rendererDrawColor renderer $= black
@@ -94,7 +97,7 @@ output renderer _ (frame, c, cpuState) = do
   drawBinary renderer aluPos bitBoxSize 8 (cpuAlu cpuState)
 
   drawLight renderer (aluPos + dotOffset) green (enabled ALUOut)
-  drawLight renderer (((`div` 2) <$> aluPos + bPos)  + dotOffset) blue (enabled Subtract)
+  drawLight renderer (((`div` 2) <$> aluPos + bPos) + dotOffset) blue (enabled Subtract)
 
   -- flags
   let flagPos = gridPoints V.! 4
@@ -153,23 +156,21 @@ output renderer _ (frame, c, cpuState) = do
   SDL.present renderer
   return (exit frame)
 
-
-
-handleSDLEvents :: MonadIO m => m (Maybe Frame)
+handleSDLEvents :: (MonadIO m) => m (Maybe Frame)
 handleSDLEvents = do
   events <- SDL.pollEvents
   let eventIsQPress event =
         case SDL.eventPayload event of
           SDL.KeyboardEvent keyboardEvent ->
-            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed &&
-            SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
+            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
+              && SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
           _ -> False
       qPressed = any eventIsQPress events
       eventIsSpacePress event =
         case SDL.eventPayload event of
           SDL.KeyboardEvent keyboardEvent ->
-            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed &&
-            SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeSpace
+            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
+              && SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeSpace
           _ -> False
       spacePressed = any eventIsSpacePress events
   (SDL.P p) <- SDL.getAbsoluteMouseLocation

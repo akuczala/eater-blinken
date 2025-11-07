@@ -2,16 +2,17 @@
 
 module SDLHelper (sdlApp, anyExitEvent) where
 
-import qualified SDL
-import FRP.Yampa (SF, reactimate)
 import Data.IORef (newIORef, readIORef, writeIORef)
+import FRP.Yampa (SF, reactimate)
 import GHC.IORef (IORef)
+import qualified SDL
 
-sdlApp :: IO a
-  -> IO (Maybe a)
-  -> (SDL.Renderer -> Bool -> b -> IO Bool)
-  -> SF a b
-  -> IO ()
+sdlApp ::
+  IO a ->
+  IO (Maybe a) ->
+  (SDL.Renderer -> Bool -> b -> IO Bool) ->
+  SF a b ->
+  IO ()
 sdlApp firstSample eventHandler output signal = do
   SDL.initializeAll
   window <- SDL.createWindow "My SDL Application" SDL.defaultWindow
@@ -37,12 +38,12 @@ input eventHandler tRef _ = do
   dt <- updateTime tRef
   return (dt, result)
 
-anyExitEvent :: Foldable t0 => t0 SDL.Event -> Bool
+anyExitEvent :: (Foldable t0) => t0 SDL.Event -> Bool
 anyExitEvent events =
   let eventIsQPress event =
         case SDL.eventPayload event of
           SDL.KeyboardEvent keyboardEvent ->
-            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed &&
-            SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
+            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
+              && SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
           _ -> False
-  in any eventIsQPress events
+   in any eventIsQPress events

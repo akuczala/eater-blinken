@@ -1,7 +1,7 @@
 module Colors where
 
-import SDL (V4(..))
 import GHC.Word (Word8)
+import SDL (V4 (..))
 
 type Color = V4 Word8
 
