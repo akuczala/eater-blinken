@@ -1,6 +1,5 @@
 module Main where
 
-import Cpu (cpuSignal)
 import FRP.Yampa
 import Text.Printf (printf)
 import Visual (test)

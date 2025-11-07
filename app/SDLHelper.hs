@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module SDLHelper (sdlApp, anyExitEvent) where
+module SDLHelper (sdlApp, handleKeyEvent) where
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import FRP.Yampa (SF, reactimate)
@@ -38,12 +38,9 @@ input eventHandler tRef _ = do
   dt <- updateTime tRef
   return (dt, result)
 
-anyExitEvent :: (Foldable t0) => t0 SDL.Event -> Bool
-anyExitEvent events =
-  let eventIsQPress event =
-        case SDL.eventPayload event of
-          SDL.KeyboardEvent keyboardEvent ->
-            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
-              && SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
-          _ -> False
-   in any eventIsQPress events
+handleKeyEvent :: SDL.InputMotion -> SDL.Keycode -> SDL.Event -> Bool
+handleKeyEvent motion keycode event = case SDL.eventPayload event of
+  SDL.KeyboardEvent keyboardEvent ->
+    SDL.keyboardEventKeyMotion keyboardEvent == motion
+      && SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == keycode
+  _ -> False

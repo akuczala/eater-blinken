@@ -49,3 +49,16 @@ countDownStop x y =
     Jump 4,
     Halt -- 8
   ]
+
+compareProgram :: Address -> Address -> [Instruction]
+compareProgram x y =
+  [ LoadI 7,
+    StoreA x,
+    LoadI 5,
+    Sub x,
+    JLZ 6,
+    Halt, -- 5
+    LoadI 1, -- 6
+    Out,
+    Halt
+  ]

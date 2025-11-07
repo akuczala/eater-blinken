@@ -18,7 +18,7 @@ import Programs
 import SDL (Renderer, V2 (..), ($=))
 import qualified SDL
 import qualified SDL.Primitive
-import SDLHelper (sdlApp)
+import SDLHelper (handleKeyEvent, sdlApp)
 import Signals (clock)
 
 test :: IO ()
@@ -29,7 +29,7 @@ signal = proc frame -> do
   -- let V2 mouseX mouseY = fromIntegral <$> mousePos frame
   -- c <- clock 0.2 -< ()
   let c = spacePressed frame
-  s <- cpuSignal (encodeProgram countDown) -< c
+  s <- cpuSignal (encodeProgram compareProgram) -< c
   returnA -< (frame, c, s)
 
 firstSample :: IO Frame
@@ -159,19 +159,11 @@ output renderer _ (frame, c, cpuState) = do
 handleSDLEvents :: (MonadIO m) => m (Maybe Frame)
 handleSDLEvents = do
   events <- SDL.pollEvents
-  let eventIsQPress event =
-        case SDL.eventPayload event of
-          SDL.KeyboardEvent keyboardEvent ->
-            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
-              && SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeQ
-          _ -> False
-      qPressed = any eventIsQPress events
-      eventIsSpacePress event =
-        case SDL.eventPayload event of
-          SDL.KeyboardEvent keyboardEvent ->
-            SDL.keyboardEventKeyMotion keyboardEvent == SDL.Pressed
-              && SDL.keysymKeycode (SDL.keyboardEventKeysym keyboardEvent) == SDL.KeycodeSpace
-          _ -> False
-      spacePressed = any eventIsSpacePress events
   (SDL.P p) <- SDL.getAbsoluteMouseLocation
-  return $ Just Frame {exit = qPressed, mousePos = p, spacePressed = spacePressed}
+  return $
+    Just
+      Frame
+        { exit = any (handleKeyEvent SDL.Pressed SDL.KeycodeQ) events,
+          mousePos = p,
+          spacePressed = any (handleKeyEvent SDL.Pressed SDL.KeycodeSpace) events
+        }

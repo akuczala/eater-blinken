@@ -7,7 +7,7 @@ module Cpu
   )
 where
 
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Vector as V
 import FRP.Yampa
 import Instructions
@@ -65,6 +65,18 @@ data CPUState = CPUState
   }
   deriving (Show)
 
+aluSignal :: SF (Data, Data, Bool) (Data, Bool, Bool)
+aluSignal = proc (a, b, sub) -> do
+  let b' = if sub then -b else b
+  let s = fromIntegral a + fromIntegral b' :: Int
+  returnA -< (fromIntegral s, s == 0, s < 0)
+
+-- get flags from aluOut
+getFlags :: Bool -> Bool -> [Flag]
+getFlags zeroFlagOn negativeFlagOn = catMaybes [f ZeroFlag zeroFlagOn, f NegativeFlag negativeFlagOn]
+  where
+    f flag enable = if enable then Just flag else Nothing
+
 cpuSignal :: Memory -> SF Bool CPUState
 cpuSignal initialMemory = proc c -> do
   microN <- microCounter -< c
@@ -86,9 +98,8 @@ cpuSignal initialMemory = proc c -> do
       a <- aRegister -< (enabled ARegisterIn && c, bus) -- A register
       b <- aRegister -< (enabled BRegisterIn && c, bus) -- B register
       out <- aRegister -< (enabled OutRegisterIn && c, bus) -- out register
-      let b' = if enabled Subtract then -b else b
-      s <- iPre 0 -< a + b' -- need to introduce delay on sum
-      flags <- arr decodeFlags <<< aRegister -< (enabled FlagRegisterIn && c, encodeFlags $ getFlags s)
+      (s, isZero, isNeg) <- iPre (defaultData, False, False) <<< aluSignal -< (a, b, enabled Subtract) -- need to introduce delay on sum
+      flags <- arr decodeFlags <<< aRegister -< (enabled FlagRegisterIn && c, encodeFlags $ getFlags isZero isNeg)
 
   returnA
     -<

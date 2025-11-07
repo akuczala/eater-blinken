@@ -2,14 +2,13 @@ module Instructions
   ( ControlSignal (..),
     Instruction (..),
     MicroInstruction,
-    Flag,
+    Flag (..),
     encodeFlags,
     decodeFlags,
     encodeInstruction,
     decodeInstruction,
     getInstructionAddress,
     getMicroInstructions,
-    getFlags,
   )
 where
 
@@ -125,13 +124,6 @@ encodeFlags :: [Flag] -> Data
 encodeFlags flags = sum $ fmap encodeFlag possibleFlags
   where
     encodeFlag flag = if flag `elem` flags then bit (fromEnum flag) else 0
-
--- get flags from aluOut
-getFlags :: Data -> [Flag]
-getFlags aluOut = catMaybes $ zipWith f flagConditions possibleFlags
-  where
-    f enable flag = if enable then Just flag else Nothing
-    flagConditions = [aluOut == 0, aluOut < 0]
 
 fetchInstruction :: Vector MicroInstruction
 fetchInstruction =
