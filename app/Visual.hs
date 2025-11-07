@@ -11,13 +11,15 @@ import Colors
 import Foreign.C (CInt)
 import Control.Monad.IO.Class (MonadIO)
 import SDLHelper (sdlApp)
-import Cpu (CPUState (..), cpuSignal, cpuOut, ControlSignal (..), encodeFlags, fibProgram, encodeProgram, countDownStop, countDown)
+import Cpu
 import Signals (clock)
 import Data.Bits (testBit)
 import qualified Data.Vector as V
 import Control.Monad (when)
 import qualified SDL.Primitive
 import GHC.Bits (Bits)
+import Instructions
+import Programs
 
 test :: IO ()
 test = sdlApp firstSample handleSDLEvents output signal
@@ -25,8 +27,8 @@ test = sdlApp firstSample handleSDLEvents output signal
 signal :: SF Frame (Frame, Bool, CPUState)
 signal = proc frame -> do
   -- let V2 mouseX mouseY = fromIntegral <$> mousePos frame
-  c <- clock 0.2 -< ()
-  --let c = spacePressed frame
+  --c <- clock 0.2 -< ()
+  let c = spacePressed frame
   s <- cpuSignal (encodeProgram countDown) -< c
   returnA -< (frame, c, s)
 

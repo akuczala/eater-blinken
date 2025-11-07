@@ -2,7 +2,15 @@
 
 module Signals where
 import FRP.Yampa
+import Data.Vector
 
+
+type Address = Data
+type Memory = Vector Data
+type Data = Word
+
+defaultData :: Data
+defaultData = 0
 
 step :: Time -> SF a Bool
 step t1 = unEdge <<< after t1 ()

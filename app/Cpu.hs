@@ -1,115 +1,18 @@
 {-# LANGUAGE Arrows #-}
-module Cpu where
+module Cpu (
+  CPUState(..), cpuSignal, encodeProgram
+) where
 
 import FRP.Yampa
-import Data.Vector (Vector)
 import qualified Data.Vector as V
-import Data.Maybe (fromMaybe)
+import Data.Maybe ( fromMaybe )
 import Signals
-import Data.Maybe (catMaybes)
-import Data.Bits (bit, Bits (testBit))
-import Data.Word (Word8)
-
-type Address = Data
-type Memory = Vector Data
-type Data = Word8
-
-defaultData :: Data
-defaultData = 0
-
-data Instruction
-  = LoadA Address
-  | StoreA Address
-  | Add Address
-  | NoOp
-  | Out
-  | Halt
-  | Jump Address
-  | JEZ Address
-  | JLZ Address
-  | LoadI Data
-  | Sub Data
-  deriving (Show, Eq)
-
-data ControlSignal
-  = ARegisterIn
-  | ARegisterOut
-  | BRegisterIn
-  | ALUOut
-  | Subtract
-  | OutRegisterIn
-  | CounterOut
-  | CounterEnable
-  | MemoryAddressIn
-  | RAMIn
-  | RAMOut
-  | InstructionRegisterIn
-  | InstructionRegisterOut -- only lower 4 bits go to bus
-  | JumpSignal
-  | FlagRegisterIn
-  deriving (Show, Eq)
-
-type MicroInstruction = [ControlSignal]
-
-data Flag = ZeroFlag | NegativeFlag
-  deriving (Show, Eq)
-
-possibleFlags :: [Flag]
-possibleFlags = [ZeroFlag, NegativeFlag]
-
-decodeFlags :: Data -> [Flag]
---decodeFlags d = catMaybes [if d `testBit` 1 then Just ZeroFlag else Nothing]
-decodeFlags d = catMaybes $ zipWith decodeFlag [0..] possibleFlags where
-  decodeFlag i flag = if d `testBit` i then Just flag else Nothing
-
-encodeFlags :: [Flag] -> Data
-encodeFlags flags = sum $ zipWith encodeFlag [0..] possibleFlags  where
-  encodeFlag i flag = if flag `elem` flags then bit i else 0
-
--- get flags from aluOut
-getFlags :: Data -> [Flag]
-getFlags aluOut = catMaybes $ zipWith f flagConditions possibleFlags where
-  f enable flag = if enable then Just flag else Nothing
-  flagConditions = [aluOut == 0, aluOut < 0]
-
-fetchInstruction :: Vector MicroInstruction
-fetchInstruction = V.fromList [
-  [CounterOut, MemoryAddressIn],
-  [RAMOut, InstructionRegisterIn, CounterEnable]
-  ]
-
--- does not include fetchInstruction
-loadA :: Vector MicroInstruction
-loadA = V.fromList [
-  [InstructionRegisterOut, MemoryAddressIn],
-  [RAMOut, ARegisterIn]
-  ]
-
-storeA :: Vector MicroInstruction
-storeA = V.fromList [
-  [InstructionRegisterOut, MemoryAddressIn],
-  [ARegisterOut, RAMIn]
-  ]
-
-addI :: Vector MicroInstruction
-addI = V.fromList [
-  [InstructionRegisterOut, MemoryAddressIn],
-  [RAMOut, BRegisterIn],
-  [ALUOut, ARegisterIn, FlagRegisterIn]
-  ]
-
-subI :: Vector MicroInstruction
-subI = V.fromList [
-  [InstructionRegisterOut, MemoryAddressIn],
-  [RAMOut, BRegisterIn],
-  [ALUOut, ARegisterIn, FlagRegisterIn, Subtract]
-  ]
+import Instructions
 
 type Register = SF (Bool, Data) Data
 
 aRegister :: Register
 aRegister = latch 0
-
 
 counterRegister :: Num a => a -> SF (Bool, Bool, Bool, a) a
 counterRegister defaultVal = let
@@ -120,7 +23,6 @@ counterRegister defaultVal = let
       _ -> i
   in
     arr adapter >>> fLatch update_ defaultVal
-
 
 maxMicroCycles :: Data
 maxMicroCycles = 4
@@ -136,102 +38,6 @@ ram initContents = proc (write, addr, dat) -> do
   returnA -< memory V.! iAddr
   where
     f m (a, d) = m V.// [(a, d)]
-
-getInstructionAddress :: Data -> Address
-getInstructionAddress d = d `mod` 16 -- lower 4 bits
-
-decodeInstruction :: Data -> Instruction
-decodeInstruction n = let
-  lower = n `mod` 16
-  upper = n `div` 16
-  in case upper of
-    1 -> LoadA lower
-    2 -> Add lower
-    3 -> Out
-    4 -> StoreA lower
-    0 -> NoOp
-    5 -> Halt
-    6 -> Jump lower
-    7 -> JEZ lower
-    8 -> JLZ lower
-    9 -> LoadI lower
-    10 -> Sub lower
-    _ -> Halt
-
-encodeInstruction :: Instruction -> Data
-encodeInstruction i = let
-  combine upper lower = upper * 16 + (lower `mod` 16)
-  in case i of
-    LoadA addr -> combine 1 addr
-    Add addr -> combine 2 addr
-    Out -> combine 3 0
-    StoreA addr -> combine 4 addr
-    NoOp -> combine 0 0
-    Halt -> combine 5 0
-    Jump addr -> combine 6 addr
-    JEZ addr -> combine 7 addr
-    JLZ addr -> combine 8 addr
-    LoadI dat -> combine 9 dat
-    Sub addr -> combine 10 addr
-
-getMicroInstructions :: [Flag] -> Instruction -> Vector MicroInstruction
-getMicroInstructions flags i = case i of
-  Halt -> mempty
-  _ -> fetchInstruction <> case i of
-    LoadA _ -> loadA
-    StoreA _ -> storeA
-    Add _ -> addI
-    NoOp -> mempty
-    Out -> V.fromList [[ARegisterOut, OutRegisterIn]]
-    Jump _ -> jumpInstructions True
-    JEZ _ -> jumpInstructions (ZeroFlag `elem` flags)
-    JLZ _ -> jumpInstructions (NegativeFlag `elem` flags)
-    LoadI _ -> V.fromList [
-      [InstructionRegisterOut, ARegisterIn]
-      ]
-    Sub _ -> subI
-    where
-      jumpInstructions doJump = V.fromList [[InstructionRegisterOut] <> ([JumpSignal | doJump])]
-
-doublingProgram :: Address -> [Instruction]
-doublingProgram x = [LoadI 1, StoreA x, LoadA x, Add x, Out, StoreA x, Jump 0]
-
-fibProgram :: Address -> Address -> [Instruction]
-fibProgram x y = [
-  LoadI 1, StoreA x, StoreA y,
-  LoadA x, Add y, Out, StoreA x,
-  Add y, Out, StoreA y,
-  Jump 3
-  ]
-
-countDown :: Address -> Address -> [Instruction]
-countDown x y = [
-  LoadI 1,
-  StoreA x,
-  LoadI 3,
-  StoreA y,
-  Sub x, -- 4
-  Out,
-  JEZ 8,
-  Jump 4,
-  LoadI 1, -- 8
-  Add y,
-  StoreA y,
-  Jump 4
-  ]
-
-countDownStop :: Address -> Address -> [Instruction]
-countDownStop x y = [
-  LoadI 1,
-  StoreA x,
-  LoadI 5,
-  StoreA y,
-  Sub x, -- 4
-  Out,
-  JEZ 8,
-  Jump 4,
-  Halt -- 8
-  ]
 
 encodeProgram :: (Address -> Address -> [Instruction]) -> Memory
 encodeProgram program = let
@@ -264,29 +70,24 @@ cpuSignal initialMemory = proc c -> do
     instructionList <- iPre (getMicroInstructions [] NoOp) -< instructionList' --provide base case
     let microInst = fromMaybe [] $ instructionList V.!? fromIntegral microN
     let enabled = (`elem` microInst)
-    let addrIn = enabled MemoryAddressIn
-    let iIn = enabled InstructionRegisterIn
-    let ramIn = enabled RAMIn
-    let aIn = enabled ARegisterIn
-    let bIn = enabled BRegisterIn
-    let outIn = enabled OutRegisterIn
     let bus
           | enabled CounterOut = n
           | enabled RAMOut = m
-          | enabled InstructionRegisterOut = getInstructionAddress instruction
+          | enabled InstructionRegisterOut = getInstructionAddress instruction -- only address goes to the bus
           | enabled ARegisterOut = a
           | enabled ALUOut = s
           | otherwise = 0
     n <- counterRegister defaultData -< (c, enabled CounterEnable, enabled JumpSignal, bus) -- counter
-    instruction <- aRegister -< (iIn && c, bus) -- instruction register
-    addr <- aRegister -< (addrIn && c, bus) -- address register
-    m <- ram initialMemory -< (ramIn && c, addr, bus) -- ram
-    a <- aRegister -< (aIn && c, bus) -- A register
-    b <- aRegister -< (bIn && c, bus) -- B register
+    instruction <- aRegister -< (enabled InstructionRegisterIn && c, bus) -- instruction register
+    addr <- aRegister -< ( enabled MemoryAddressIn && c, bus) -- address register
+    m <- ram initialMemory -< (enabled RAMIn && c, addr, bus) -- ram
+    a <- aRegister -< (enabled ARegisterIn && c, bus) -- A register
+    b <- aRegister -< (enabled BRegisterIn && c, bus) -- B register
+    out <- aRegister -< (enabled OutRegisterIn && c, bus) -- out register
     let b' = if enabled Subtract then -b else b
     s <- iPre 0 -< a + b' -- need to introduce delay on sum
     flags <- arr decodeFlags <<< aRegister -< (enabled FlagRegisterIn && c, encodeFlags $ getFlags s)
-    out <- aRegister -< (outIn && c, bus) -- out register
+    
 
   returnA -< CPUState {
     cpuA=a,
