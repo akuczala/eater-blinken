@@ -39,58 +39,66 @@ data ControlSignal
 data Instruction
   = LoadA Address
   | StoreA Address
+  | LoadI Address
   | Add Address
+  | Sub Address
+  | Inc
+  | Dec
   | NoOp
   | Out
   | Halt
   | Jump Address
   | JEZ Address
   | JLZ Address
-  | LoadI Address
-  | Sub Address
   deriving (Show, Eq)
 
 data InstructionTag
   = LoadATag
   | StoreATag
+  | LoadITag
   | AddTag
+  | SubTag
+  | IncTag
+  | DecTag
   | NoOpTag
   | OutTag
   | HaltTag
   | JumpTag
   | JEZTag
   | JLZTag
-  | LoadITag
-  | SubTag
   deriving (Show, Eq, Enum)
 
 tagToInstruction :: InstructionTag -> Address -> Instruction
 tagToInstruction t d = case t of
   LoadATag -> LoadA d
   StoreATag -> StoreA d
+  LoadITag -> LoadI d
   AddTag -> Add d
+  SubTag -> Sub d
+  IncTag -> Inc
+  DecTag -> Dec
   NoOpTag -> NoOp
   OutTag -> Out
   HaltTag -> Halt
   JumpTag -> Jump d
   JEZTag -> JEZ d
   JLZTag -> JLZ d
-  LoadITag -> LoadI d
-  SubTag -> Sub d
 
 instructionToTag :: Instruction -> (InstructionTag, Address)
 instructionToTag i = case i of
   LoadA a -> (LoadATag, a)
   StoreA a -> (StoreATag, a)
+  LoadI a -> (LoadITag, a)
   Add a -> (AddTag, a)
+  Sub a -> (SubTag, a)
+  Inc -> (IncTag, 1)
+  Dec -> (DecTag, 1)
   NoOp -> (NoOpTag, defaultData)
   Out -> (OutTag, defaultData)
   Halt -> (HaltTag, defaultData)
   Jump a -> (JumpTag, a)
   JEZ a -> (JEZTag, a)
   JLZ a -> (JLZTag, a)
-  LoadI a -> (LoadITag, a)
-  Sub a -> (SubTag, a)
 
 getInstructionAddress :: Data -> Address
 getInstructionAddress d = d `mod` 16 -- lower 4 bits
@@ -181,5 +189,15 @@ getMicroInstructions flags i = case i of
           [ [InstructionRegisterOut, ARegisterIn]
           ]
       Sub _ -> subI
+      Inc ->
+        V.fromList
+          [ [InstructionRegisterOut, BRegisterIn],
+            [ALUOut, ARegisterIn, FlagRegisterIn]
+          ]
+      Dec ->
+        V.fromList
+          [ [InstructionRegisterOut, BRegisterIn],
+            [ALUOut, ARegisterIn, FlagRegisterIn, Subtract]
+          ]
     where
       jumpInstructions doJump = V.fromList [[InstructionRegisterOut] <> ([JumpSignal | doJump])]

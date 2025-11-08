@@ -50,6 +50,17 @@ countDownStop x y =
     Halt -- 8
   ]
 
+countDownStop2 :: Address -> Address -> [Instruction]
+countDownStop2 x y =
+  [ LoadI 0xF,
+    StoreA y,
+    Dec, -- 2
+    Out,
+    JEZ 6,
+    Jump 2,
+    Jump 0 -- 6
+  ]
+
 compareProgram :: Address -> Address -> [Instruction]
 compareProgram x y =
   [ LoadI 7,
