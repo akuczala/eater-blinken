@@ -3,8 +3,8 @@
 module Signals where
 
 import Data.Vector
-import FRP.Yampa
 import Data.Word (Word8)
+import FRP.Yampa
 
 type Address = Data
 

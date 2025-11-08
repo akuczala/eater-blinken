@@ -5,9 +5,10 @@
 module Visual where
 
 import Colors
-import Control.Monad (when)
+import Control.Monad (when, zipWithM_)
 import Control.Monad.IO.Class (MonadIO)
 import Cpu
+import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
 import FRP.Yampa (SF, returnA)
 import Foreign.C (CInt)
@@ -19,7 +20,6 @@ import qualified SDL.Primitive
 import SDLHelper (handleKeyEvent, sdlApp)
 import Signals (clock)
 import UI
-import Data.Maybe (fromMaybe)
 
 test :: IO ()
 test = do
@@ -50,6 +50,20 @@ data Frame = Frame
     pPressed :: Bool
   }
 
+output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
+output renderer _ (frame, c, cpuState) = do
+  when (pPressed frame) $ do
+    print cpuState
+    print (decodeInstruction $ cpuInstruction cpuState)
+
+  SDL.rendererDrawColor renderer $= black
+  SDL.clear renderer
+
+  drawBlinkenlights renderer cpuState
+
+  SDL.present renderer
+  return (exit frame)
+
 mkGrid :: Int -> Int -> V.Vector (V2 Double)
 mkGrid m n =
   V.fromList
@@ -73,115 +87,115 @@ drawLight renderer pos color enable = do
   when enable $
     SDL.Primitive.fillCircle renderer (fromIntegral <$> pos) lightRadius color
 
-type Env = SegmentData
-
-output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
-output renderer _ (frame, c, cpuState) = do
-  when (pPressed frame) $ do
-    print cpuState
-    print (decodeInstruction $ cpuInstruction cpuState)
-
+drawBlinkenlights :: Renderer -> CPUState -> IO ()
+drawBlinkenlights renderer cpuState = do
   let enabled controlSignal = controlSignal `elem` cpuMicro cpuState
-  SDL.rendererDrawColor renderer $= black
-  SDL.clear renderer
-
   let dotOffset = V2 (-25) 10
 
-  let gridPoints = fmap round . (+ V2 50 50) . (* V2 800 600) <$> mkGrid 3 3
-  SDL.rendererDrawColor renderer $= cyan
-  drawBinary renderer (gridPoints V.! 1) bitBoxSize 8 (cpuBus cpuState)
+  -- bus
+  let drawBus pos = do
+        SDL.rendererDrawColor renderer $= cyan
+        drawBinary renderer pos bitBoxSize 8 (cpuBus cpuState)
 
-  -- A
-  let aluPos = gridPoints V.! 5
-  let aPos = aluPos + V2 0 (-60)
-  SDL.rendererDrawColor renderer $= red
-  drawBinary renderer aPos bitBoxSize 8 (cpuA cpuState)
+  let drawAlu aluPos = do
+        -- A
+        let aPos = aluPos + V2 0 (-60)
+        SDL.rendererDrawColor renderer $= red
+        drawBinary renderer aPos bitBoxSize 8 (cpuA cpuState)
 
-  drawLight renderer (aPos + dotOffset) red (enabled ARegisterIn)
-  drawLight renderer (aPos + dotOffset) green (enabled ARegisterOut)
+        drawLight renderer (aPos + dotOffset) red (enabled ARegisterIn)
+        drawLight renderer (aPos + dotOffset) green (enabled ARegisterOut)
 
-  -- B
-  let bPos = aluPos + V2 0 60
-  SDL.rendererDrawColor renderer $= orange
-  drawBinary renderer bPos bitBoxSize 8 (cpuB cpuState)
+        -- B
+        let bPos = aluPos + V2 0 60
+        SDL.rendererDrawColor renderer $= orange
+        drawBinary renderer bPos bitBoxSize 8 (cpuB cpuState)
 
-  drawLight renderer (bPos + dotOffset) red (enabled BRegisterIn)
+        drawLight renderer (bPos + dotOffset) red (enabled BRegisterIn)
 
-  -- Alu
-  SDL.rendererDrawColor renderer $= magenta
-  drawBinary renderer aluPos bitBoxSize 8 (cpuAlu cpuState)
+        -- Alu
+        SDL.rendererDrawColor renderer $= magenta
+        drawBinary renderer aluPos bitBoxSize 8 (cpuAlu cpuState)
 
-  drawLight renderer (aluPos + dotOffset) green (enabled ALUOut)
-  drawLight renderer (((`div` 2) <$> aluPos + bPos) + dotOffset) blue (enabled Subtract)
+        drawLight renderer (aluPos + dotOffset) green (enabled ALUOut)
+        drawLight renderer (((`div` 2) <$> aluPos + bPos) + dotOffset) blue (enabled Subtract)
 
   -- flags
-  let flagPos = gridPoints V.! 4
-  SDL.rendererDrawColor renderer $= orange
-  drawBinary renderer flagPos bitBoxSize 2 (encodeFlags $ cpuFlags cpuState)
-  drawLight renderer (flagPos + dotOffset) red (enabled FlagRegisterIn)
+  let drawFlags pos = do
+        SDL.rendererDrawColor renderer $= orange
+        drawBinary renderer pos bitBoxSize 2 (encodeFlags $ cpuFlags cpuState)
+        drawLight renderer (pos + dotOffset) red (enabled FlagRegisterIn)
 
   -- out
-  let outPos = gridPoints V.! 8
-  SDL.rendererDrawColor renderer $= white
-  drawBinary renderer outPos bitBoxSize 8 (cpuOut cpuState)
+  let drawOut pos = do
+        SDL.rendererDrawColor renderer $= white
+        drawBinary renderer pos bitBoxSize 8 (cpuOut cpuState)
 
-  drawLight renderer (outPos + dotOffset) red (enabled OutRegisterIn)
+        drawLight renderer (pos + dotOffset) red (enabled OutRegisterIn)
 
-  drawDigitDisplay
-    (drawSegments renderer cyan)
-    (pure digitScale)
-    (outPos + V2 0 (bitBoxSize * 2))
-    (fromMaybe [segmentError] $ toLastNDigitsBase 10 3 (cpuOut cpuState))
+        drawDigitDisplay
+          (drawSegments renderer cyan)
+          (pure digitScale)
+          (pos + V2 0 (bitBoxSize * 2))
+          (fromMaybe [segmentError] $ toLastNDigitsBase 10 3 (cpuOut cpuState))
 
-  -- address
-  let addrPos = gridPoints V.! 3
-  SDL.rendererDrawColor renderer $= yellow
-  drawBinary renderer addrPos bitBoxSize 4 (cpuAddr cpuState)
+  let drawMemory addrPos = do
+        -- address
+        SDL.rendererDrawColor renderer $= yellow
+        drawBinary renderer addrPos bitBoxSize 4 (cpuAddr cpuState)
 
-  drawLight renderer (addrPos + dotOffset) red (enabled MemoryAddressIn)
+        drawLight renderer (addrPos + dotOffset) red (enabled MemoryAddressIn)
 
-  -- memory IO
-  let memPos = addrPos + V2 0 60
-  SDL.rendererDrawColor renderer $= red
-  drawBinary renderer memPos bitBoxSize 8 (cpuMemory cpuState)
+        -- memory IO
+        let memPos = addrPos + V2 0 60
+        SDL.rendererDrawColor renderer $= red
+        drawBinary renderer memPos bitBoxSize 8 (cpuMemory cpuState)
 
-  drawLight renderer (memPos + dotOffset) red (enabled RAMIn)
-  drawLight renderer (memPos + dotOffset) green (enabled RAMOut)
+        drawLight renderer (memPos + dotOffset) red (enabled RAMIn)
+        drawLight renderer (memPos + dotOffset) green (enabled RAMOut)
 
-  drawDigitDisplay
-    (drawSegments renderer red)
-    (pure digitScale)
-    (memPos + V2 0 (bitBoxSize * 2))
-    (fromMaybe [segmentError] $ toLastNDigitsBase 16 2 (cpuMemory cpuState))
+        drawDigitDisplay
+          (drawSegments renderer red)
+          (pure digitScale)
+          (memPos + V2 0 (bitBoxSize * 2))
+          (fromMaybe [segmentError] $ toLastNDigitsBase 16 2 (cpuMemory cpuState))
 
-  -- upper 4 instruction
-  let instPos = gridPoints V.! 7
+  let drawInstruction pos = do
+        -- upper 4 instruction
+        SDL.rendererDrawColor renderer $= blue
+        drawBinary renderer pos bitBoxSize 4 (cpuInstruction cpuState `div` 16)
 
-  SDL.rendererDrawColor renderer $= blue
-  drawBinary renderer instPos bitBoxSize 4 (cpuInstruction cpuState `div` 16)
+        -- lower 4 instruction
 
-  -- lower 4 instruction
+        SDL.rendererDrawColor renderer $= yellow
+        drawBinary renderer (pos + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 4 (cpuInstruction cpuState)
 
-  SDL.rendererDrawColor renderer $= yellow
-  drawBinary renderer (instPos + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 4 (cpuInstruction cpuState)
+        drawLight renderer (pos + dotOffset) red (enabled InstructionRegisterIn)
+        drawLight renderer (pos + dotOffset) green (enabled InstructionRegisterOut)
 
-  drawLight renderer (instPos + dotOffset) red (enabled InstructionRegisterIn)
-  drawLight renderer (instPos + dotOffset) green (enabled InstructionRegisterOut)
+  let drawCounter pos = do
+        -- program counter
+        SDL.rendererDrawColor renderer $= green
+        drawBinary renderer pos bitBoxSize 4 (cpuCounter cpuState)
 
-  -- program counter
-  let progPos = gridPoints V.! 2
-  SDL.rendererDrawColor renderer $= green
-  drawBinary renderer progPos bitBoxSize 4 (cpuCounter cpuState)
+        drawLight renderer (pos + dotOffset) green (enabled CounterOut)
+        drawLight renderer (pos + dotOffset) red (enabled JumpSignal)
 
-  drawLight renderer (progPos + dotOffset) green (enabled CounterOut)
-  drawLight renderer (progPos + dotOffset) red (enabled JumpSignal)
+        -- micro counter
+        SDL.rendererDrawColor renderer $= blue
+        drawBinary renderer (pos + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 3 (cpuMicroCounter cpuState)
 
-  -- micro counter
-  SDL.rendererDrawColor renderer $= blue
-  drawBinary renderer (progPos + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 3 (cpuMicroCounter cpuState)
-
-  SDL.present renderer
-  return (exit frame)
+  do
+    let gridPoints = fmap round . (+ V2 50 50) . (* V2 800 600) <$> mkGrid 3 3
+    let f i draw = draw (gridPoints V.! i)
+    let blank _ = pure ()
+{- ORMOLU_DISABLE -}
+    zipWithM_ f [0..] [
+      blank,      drawBus,         drawCounter,
+      drawMemory, drawFlags,       drawAlu,
+      blank,      drawInstruction, drawOut
+      ]
+{- ORMOLU_ENABLE -}
 
 handleSDLEvents :: (MonadIO m) => m (Maybe Frame)
 handleSDLEvents = do

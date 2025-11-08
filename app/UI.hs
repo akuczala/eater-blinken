@@ -1,10 +1,7 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module UI
   ( drawSegments,
     drawDigitDisplay,
     drawBinary,
-    SegmentData,
     toLastNDigitsBase,
     segmentError,
   )
@@ -55,9 +52,9 @@ type SegmentData = (V.Vector (VS.Vector Float, VS.Vector Float))
 both :: (Bifunctor f) => (a -> b) -> f a a -> f b b
 both f = bimap f f
 
+{- ORMOLU_DISABLE -}
 segmentShapes :: SegmentData
 segmentShapes = V.fromList . fmap (both VS.fromList) $
-{- ORMOLU_DISABLE -}
   [([0.8527, 0.733 , 0.2684, 0.1462, 0.2684, 0.733 , 0.8527],
     [0.122 , 0.2441, 0.2441, 0.122 , 0.0   , 0.0   , 0.122 ]),
 
