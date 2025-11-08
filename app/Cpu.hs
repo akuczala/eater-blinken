@@ -16,7 +16,7 @@ import Signals
 type Register = SF (Bool, Data) Data
 
 aRegister :: Register
-aRegister = latch 0
+aRegister = latch defaultData
 
 counterRegister :: (Num a) => a -> SF (Bool, Bool, Bool, a) a
 counterRegister defaultVal =
@@ -67,8 +67,9 @@ data CPUState = CPUState
 
 aluSignal :: SF (Data, Data, Bool) (Data, Bool, Bool)
 aluSignal = proc (a, b, sub) -> do
-  let b' = if sub then -b else b
-  let s = fromIntegral a + fromIntegral b' :: Int
+  let b' = fromIntegral b :: Int
+  let b'' = if sub then -b' else b'
+  let s = fromIntegral a + fromIntegral b'' :: Int
   returnA -< (fromIntegral s, s == 0, s < 0)
 
 -- get flags from aluOut

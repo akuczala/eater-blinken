@@ -1,19 +1,19 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module UI
-  ( loadSegments,
-    drawSegments,
+  ( drawSegments,
     drawDigitDisplay,
     drawBinary,
     SegmentData,
     toLastNDigitsBase,
+    segmentError,
   )
 where
 
 import Colors
 import Control.Monad (when, zipWithM_)
+import Data.Bifunctor (Bifunctor, bimap)
 import Data.Bits (Bits, testBit)
-import qualified Data.Text as T
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word8)
@@ -23,54 +23,75 @@ import qualified SDL
 import SDL.Primitive (fillPolygon)
 import Signals (Data)
 
-pairUp :: [a] -> [(a, a)]
-pairUp (x : y : xs) = (x, y) : pairUp xs
-pairUp [x] = []
-pairUp [] = []
+segmentError :: (Integral a) => a
+segmentError = 17
 
-loadSegments :: IO (V.Vector (VS.Vector Float, VS.Vector Float))
-loadSegments = do
-  contents <- readFile "segments.csv"
-  let readVal = read . T.unpack
-  let readLine = VS.fromList . fmap readVal <$> T.splitOn "," . T.pack
-  let ss = V.fromList . pairUp $ readLine <$> lines contents
-  return ss
+segmentErrorCode :: Word8
+segmentErrorCode = 0x09 -- show top + bottom segments only for any "invalid" digit
 
-digitSegments :: V.Vector Word8
-digitSegments =
-  V.fromList
-    [ 0x3F, -- 0
-      0x06, -- 1
-      0x5B, -- 2
-      0x4F, -- 3
-      0x66, -- 4
-      0x6D, -- 5
-      0x7D, -- 6
-      0x07, -- 7
-      0x7F, -- 8
-      0x6F, -- 9
-      0x77, -- A
-      0x7C, -- B
-      0x39, -- C
-      0x5E, -- D
-      0x79, -- E
-      0x71 -- F
-    ]
+digitToSegments :: (Integral a) => a -> Word8
+digitToSegments i = case i of
+  0 -> 0x3F
+  1 -> 0x06
+  2 -> 0x5B
+  3 -> 0x4F
+  4 -> 0x66
+  5 -> 0x6D
+  6 -> 0x7D
+  7 -> 0x07
+  8 -> 0x7F
+  9 -> 0x6F
+  10 -> 0x77
+  11 -> 0x7C
+  12 -> 0x39
+  13 -> 0x5E
+  14 -> 0x79
+  15 -> 0x71
+  e | e == segmentError -> segmentError
+  _ -> segmentErrorCode
 
 type SegmentData = (V.Vector (VS.Vector Float, VS.Vector Float))
 
-drawSegments :: Renderer -> SegmentData -> Color -> V2 Int -> V2 Int -> Data -> IO ()
-drawSegments renderer segments color (V2 xScale yScale) (V2 x0 y0) d = do
-  zipWithM_ f (V.toList segments) dataBits
+both :: (Bifunctor f) => (a -> b) -> f a a -> f b b
+both f = bimap f f
+
+segmentShapes :: SegmentData
+segmentShapes = V.fromList . fmap (both VS.fromList) $
+{- ORMOLU_DISABLE -}
+  [([0.8527, 0.733 , 0.2684, 0.1462, 0.2684, 0.733 , 0.8527],
+    [0.122 , 0.2441, 0.2441, 0.122 , 0.0   , 0.0   , 0.122 ]),
+
+   ([0.878 , 1.0   , 1.0   , 0.878 , 0.7559, 0.7559, 0.878 ],
+    [0.1448, 0.2645, 0.6189, 0.7411, 0.6189, 0.2645, 0.1448]),
+
+   ([0.878 , 1.0   , 1.0   , 0.878 , 0.7559, 0.7559, 0.878 ],
+    [0.7909, 0.9107, 1.265 , 1.3872, 1.265 , 0.9107, 0.7909]),
+
+   ([0.8527, 0.733 , 0.2684, 0.1462, 0.2684, 0.733 , 0.8527],
+    [1.4099, 1.5319, 1.5319, 1.4099, 1.2879, 1.2879, 1.4099]),
+
+   ([0.122 , 0.2441, 0.2441, 0.122 , 0.0   , 0.0   , 0.122 ],
+    [0.7909, 0.9107, 1.265 , 1.3872, 1.265 , 0.9107, 0.7909]),
+
+   ([0.122 , 0.2441, 0.2441, 0.122 , 0.0   , 0.0   , 0.122 ],
+    [0.1448, 0.2645, 0.6189, 0.7411, 0.6189, 0.2645, 0.1448]),
+
+   ([0.8527, 0.733 , 0.2684, 0.1462, 0.2684, 0.733 , 0.8527],
+    [0.7638, 0.8858, 0.8858, 0.7638, 0.6417, 0.6417, 0.7638])]
+{- ORMOLU_ENABLE -}
+
+drawSegments :: Renderer -> Color -> V2 Int -> V2 Int -> Word8 -> IO ()
+drawSegments renderer color (V2 xScale yScale) (V2 x0 y0) d = do
+  zipWithM_ f (V.toList segmentShapes) dataBits
   where
-    dataBits = ((digitSegments V.! fromIntegral d) `testBit`) <$> [0 .. 7]
+    dataBits = (digitToSegments d `testBit`) <$> [0 .. 7]
     f (xs, ys) b = when b $ SDL.Primitive.fillPolygon renderer xs' ys' color
       where
         xs' = convert xScale x0 xs
         ys' = convert yScale y0 ys
         convert scale pos = VS.map (round . (+ fromIntegral pos) . (* fromIntegral scale))
 
-drawDigitDisplay :: (V2 Int -> V2 Int -> Data -> IO ()) -> V2 Int -> V2 Int -> [Data] -> IO ()
+drawDigitDisplay :: (V2 Int -> V2 Int -> Data -> IO ()) -> V2 Int -> V2 Int -> [Word8] -> IO ()
 drawDigitDisplay draw scale@(V2 xScale _) (V2 x0 y0) = zipWithM_ f [0 ..]
   where
     f i = draw scale (V2 (x0 + i * (xScale + xSep)) y0)
@@ -84,12 +105,12 @@ drawBinary renderer p0 size nBits n = mapM_ drawBit [0 .. nBits - 1]
         SDL.Rectangle (SDL.P $ fromIntegral <$> p0 + V2 (((nBits - 1) - i) * (fromIntegral size + 5)) 0) (V2 size size)
 
 -- > vibe coded
-toLastNDigitsBase :: (Integral a) => a -> Int -> a -> [a]
+toLastNDigitsBase :: (Integral a) => a -> Int -> a -> Maybe [a]
 toLastNDigitsBase base width n
-  | base < 2 = error "Base must be 2 or greater"
-  | width < 0 = error "Width must be non-negative"
-  | n < 0 = error "Input number must be non-negative"
-  | otherwise = go width n []
+  | base < 2 = Nothing
+  | width < 0 = Nothing
+  | n < 0 = Nothing
+  | otherwise = Just $ go width n []
   where
     go steps x acc
       | steps <= 0 = acc

@@ -19,17 +19,16 @@ import qualified SDL.Primitive
 import SDLHelper (handleKeyEvent, sdlApp)
 import Signals (clock)
 import UI
+import Data.Maybe (fromMaybe)
 
 test :: IO ()
 test = do
-  segments <- loadSegments
-  let env = segments
-  sdlApp firstSample handleSDLEvents (output env) signal
+  sdlApp firstSample handleSDLEvents output signal
 
 signal :: SF Frame (Frame, Bool, CPUState)
 signal = proc frame -> do
   -- let V2 mouseX mouseY = fromIntegral <$> mousePos frame
-  c <- clock 0.05 -< ()
+  c <- clock 0.1 -< ()
   -- let c = spacePressed frame
   s <- cpuSignal (encodeProgram countDownStop2) -< c
   returnA -< (frame, c, s)
@@ -65,6 +64,9 @@ lightRadius = 10
 bitBoxSize :: (Integral a) => a
 bitBoxSize = 20
 
+digitScale :: (Integral a) => a
+digitScale = 32
+
 drawLight :: Renderer -> V2 Int -> Color -> Bool -> IO ()
 drawLight renderer pos color enable = do
   SDL.Primitive.circle renderer (fromIntegral <$> pos) lightRadius white
@@ -73,8 +75,8 @@ drawLight renderer pos color enable = do
 
 type Env = SegmentData
 
-output :: Env -> Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
-output env renderer _ (frame, c, cpuState) = do
+output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
+output renderer _ (frame, c, cpuState) = do
   when (pPressed frame) $ do
     print cpuState
     print (decodeInstruction $ cpuInstruction cpuState)
@@ -125,7 +127,11 @@ output env renderer _ (frame, c, cpuState) = do
 
   drawLight renderer (outPos + dotOffset) red (enabled OutRegisterIn)
 
-  drawDigitDisplay (drawSegments renderer env cyan) (pure 24) (outPos + V2 0 (bitBoxSize * 2)) (toLastNDigitsBase 10 3 (cpuOut cpuState))
+  drawDigitDisplay
+    (drawSegments renderer cyan)
+    (pure digitScale)
+    (outPos + V2 0 (bitBoxSize * 2))
+    (fromMaybe [segmentError] $ toLastNDigitsBase 10 3 (cpuOut cpuState))
 
   -- address
   let addrPos = gridPoints V.! 3
@@ -142,7 +148,11 @@ output env renderer _ (frame, c, cpuState) = do
   drawLight renderer (memPos + dotOffset) red (enabled RAMIn)
   drawLight renderer (memPos + dotOffset) green (enabled RAMOut)
 
-  drawDigitDisplay (drawSegments renderer env red) (pure 24) (memPos + V2 0 (bitBoxSize * 2)) (toLastNDigitsBase 16 2 (cpuMemory cpuState))
+  drawDigitDisplay
+    (drawSegments renderer red)
+    (pure digitScale)
+    (memPos + V2 0 (bitBoxSize * 2))
+    (fromMaybe [segmentError] $ toLastNDigitsBase 16 2 (cpuMemory cpuState))
 
   -- upper 4 instruction
   let instPos = gridPoints V.! 7

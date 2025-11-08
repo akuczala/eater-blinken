@@ -4,12 +4,13 @@ module Signals where
 
 import Data.Vector
 import FRP.Yampa
+import Data.Word (Word8)
 
 type Address = Data
 
 type Memory = Vector Data
 
-type Data = Word
+type Data = Word8
 
 defaultData :: Data
 defaultData = 0
