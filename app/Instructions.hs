@@ -13,7 +13,7 @@ module Instructions
 where
 
 import Data.Bits (Bits (bit), testBit)
-import Data.Maybe (catMaybes, mapMaybe)
+import Data.Maybe (mapMaybe)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Signals
