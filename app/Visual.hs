@@ -1,13 +1,15 @@
 {-# LANGUAGE Arrows #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Visual (main) where
 
 import Colors
-import Control.Monad (when, zipWithM_)
+import Control.Monad (guard, join, when)
 import Control.Monad.IO.Class (MonadIO)
 import Cpu
+import Data.Maybe (catMaybes)
 import qualified Data.Vector as V
 import FRP.Yampa (SF, returnA)
 import Foreign.C (CInt)
@@ -16,7 +18,7 @@ import Programs
 import SDL (Renderer, V2 (..), ($=))
 import qualified SDL
 import SDLHelper (handleKeyEvent, sdlApp)
-import Signals (clock)
+import Signals (clock, fLatch)
 import UI
 
 main :: IO ()
@@ -25,10 +27,9 @@ main = do
 
 signal :: SF Frame (Frame, Bool, CPUState)
 signal = proc frame -> do
-  -- let V2 mouseX mouseY = fromIntegral <$> mousePos frame
+  clockEnabled <- fLatch (const . not) False -< (cReleased frame, ())
   c <- clock 0.1 -< ()
-  -- let c = spacePressed frame
-  s <- cpuSignal (encodeProgram countDownStop2) -< c
+  s <- cpuSignal (encodeProgram fibProgram) -< (clockEnabled && c || spacePressed frame)
   returnA -< (frame, c, s)
 
 firstSample :: IO Frame
@@ -38,18 +39,20 @@ firstSample = do
       { exit = False,
         mousePos = V2 0 0,
         spacePressed = False,
-        pPressed = False
+        pPressed = False,
+        cReleased = False
       }
 
 data Frame = Frame
   { exit :: Bool,
     mousePos :: V2 CInt,
     spacePressed :: Bool,
-    pPressed :: Bool
+    pPressed :: Bool,
+    cReleased :: Bool
   }
 
 output :: Renderer -> Bool -> (Frame, Bool, CPUState) -> IO Bool
-output renderer _ (frame, c, cpuState) = do
+output renderer _ (frame, _c, cpuState) = do
   when (pPressed frame) $ do
     print cpuState
     print (decodeInstruction $ cpuInstruction cpuState)
@@ -73,9 +76,12 @@ mkGrid m n =
 dotOffset :: V2 Int
 dotOffset = V2 (-25) 0
 
+dotOffsetLeft :: (Integral a) => a -> V2 a
+dotOffsetLeft n = V2 ((bitBoxSize + 5) * (n + 2)) 0
+
 busElements :: Pos -> [UIElement]
 busElements p =
-  [ BinaryLights cyan p 8 cpuBus
+  [ BinaryLights white (p + V2 0 (bitBoxSize * 2)) 8 cpuBus
   ]
 
 aluElements :: Pos -> [UIElement]
@@ -94,12 +100,12 @@ aluElements aluPos =
 flagElements :: Pos -> [UIElement]
 flagElements pos =
   [ BinaryLights magenta pos 2 (encodeFlags . cpuFlags),
-    ControlLight (pos + dotOffset) (Just FlagRegisterIn) Nothing
+    ControlLight (pos + dotOffset + dotOffsetLeft 2) (Just FlagRegisterIn) Nothing
   ]
 
 outElements :: Pos -> [UIElement]
 outElements pos =
-  [ BinaryLights white pos 8 cpuOut,
+  [ BinaryLights cyan pos 8 cpuOut,
     ControlLight (pos + dotOffset) (Just OutRegisterIn) Nothing,
     SegmentDisplay cyan (pos + V2 0 (bitBoxSize * 2)) 3 DecMode cpuOut
   ]
@@ -108,9 +114,9 @@ memoryElements :: Pos -> [UIElement]
 memoryElements addrPos =
   let memPos = addrPos + V2 0 60
    in [ BinaryLights yellow addrPos 4 cpuAddr,
-        ControlLight (addrPos + dotOffset) (Just MemoryAddressIn) Nothing,
+        ControlLight (addrPos + dotOffset + dotOffsetLeft 4) (Just MemoryAddressIn) Nothing,
         BinaryLights green memPos 8 cpuMemory,
-        ControlLight (memPos + dotOffset) (Just RAMIn) (Just RAMOut),
+        ControlLight (memPos + dotOffset + dotOffsetLeft 8) (Just RAMIn) (Just RAMOut),
         SegmentDisplay green (memPos + V2 0 (bitBoxSize * 2)) 2 HexMode cpuMemory
       ]
 
@@ -118,7 +124,7 @@ instructionElements :: Pos -> [UIElement]
 instructionElements pos =
   [ BinaryLights blue pos 4 ((`div` 16) . cpuInstruction),
     BinaryLights yellow (pos + V2 ((bitBoxSize + 5) * 4) 0) 4 cpuInstruction,
-    ControlLight (pos + dotOffset) (Just InstructionRegisterIn) (Just InstructionRegisterOut)
+    ControlLight (pos + dotOffset + dotOffsetLeft 8) (Just InstructionRegisterIn) (Just InstructionRegisterOut)
   ]
 
 counterElements :: Pos -> [UIElement]
@@ -128,22 +134,40 @@ counterElements pos =
     ControlLight (pos + dotOffset) (Just JumpSignal) (Just CounterOut)
   ]
 
+drawConnections :: Renderer -> MicroInstruction -> [UIElement] -> IO ()
+drawConnections renderer microInstruction elmts =
+  let tryPos pos mc = do
+        c <- mc
+        guard (c `elem` microInstruction)
+        return pos
+      inControls = catMaybes $ flip fmap elmts $ \case
+        ControlLight pos mc1 _ -> tryPos pos mc1
+        _ -> Nothing
+      outControls = catMaybes $ flip fmap elmts $ \case
+        ControlLight pos _ mc2 -> tryPos pos mc2
+        _ -> Nothing
+   in sequence_
+        [ drawConnection renderer 400 p1 p2 | p1 <- inControls, p2 <- outControls
+        ]
+
 {- ORMOLU_DISABLE -}
 drawBlinkenlights :: Renderer -> CPUState -> IO ()
 drawBlinkenlights renderer cpuState = do
-  do
-    let gridPoints = fmap round . (+ V2 50 50) . (* V2 800 600) <$> mkGrid 3 3
-    let draw i elmts = mapM_ (drawUIElement renderer cpuState) (elmts (gridPoints V.! i))
-    let blank _ = []
-    let elements = [
-    
-          blank,          busElements,         counterElements,
-          memoryElements, flagElements,        aluElements,
-          blank,          instructionElements, outElements
-          ]
-    zipWithM_ draw [0..] elements
-  SDL.rendererDrawColor renderer $= cyan
-  drawConnection renderer 400 (V2 100 100) (V2 500 500)
+  let gridPoints = fmap round . (+ V2 35 50) . (* V2 800 600) <$> mkGrid 3 3
+  let place i es = es (gridPoints V.! i)
+  let draw = mapM_ (drawUIElement renderer cpuState)
+  let blank _ = []
+  let elements = zipWith place [0..] [
+        flagElements,          blank,         counterElements,
+        memoryElements, blank,        aluElements,
+        instructionElements, busElements          , outElements
+        ]
+
+  SDL.rendererDrawColor renderer $= white
+  drawConnections renderer (cpuMicro cpuState) (join elements)
+
+  mapM_ draw elements
+
 {- ORMOLU_ENABLE -}
 
 handleSDLEvents :: (MonadIO m) => m (Maybe Frame)
@@ -156,5 +180,6 @@ handleSDLEvents = do
         { exit = any (handleKeyEvent SDL.Pressed SDL.KeycodeQ) events,
           mousePos = p,
           spacePressed = any (handleKeyEvent SDL.Pressed SDL.KeycodeSpace) events,
-          pPressed = any (handleKeyEvent SDL.Pressed SDL.KeycodeP) events
+          pPressed = any (handleKeyEvent SDL.Pressed SDL.KeycodeP) events,
+          cReleased = any (handleKeyEvent SDL.Released SDL.KeycodeC) events
         }

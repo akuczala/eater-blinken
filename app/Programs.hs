@@ -8,17 +8,18 @@ doublingProgram x = [LoadI 1, StoreA x, LoadA x, Add x, Out, StoreA x, Jump 0]
 
 fibProgram :: Address -> Address -> [Instruction]
 fibProgram x y =
-  [ LoadI 1,
+  [ LoadI 0,
     StoreA x,
+    LoadI 1,
     StoreA y,
-    LoadA x,
+    LoadA x, -- 4
     Add y,
     Out,
     StoreA x,
     Add y,
     Out,
     StoreA y,
-    Jump 3
+    Jump 4
   ]
 
 countDown :: Address -> Address -> [Instruction]
@@ -51,7 +52,7 @@ countDownStop x y =
   ]
 
 countDownStop2 :: Address -> Address -> [Instruction]
-countDownStop2 x y =
+countDownStop2 _ y =
   [ LoadI 0xF,
     StoreA y,
     Dec, -- 2
@@ -62,7 +63,7 @@ countDownStop2 x y =
   ]
 
 compareProgram :: Address -> Address -> [Instruction]
-compareProgram x y =
+compareProgram x _ =
   [ LoadI 7,
     StoreA x,
     LoadI 5,

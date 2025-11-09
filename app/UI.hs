@@ -122,11 +122,13 @@ toLastNDigitsBase base width n
 
 drawConnection :: Renderer -> Int -> V2 Int -> V2 Int -> IO ()
 drawConnection renderer xVertical (V2 x1 y1) (V2 x2 y2) = do
+  let y1' = y1 + lightRadius
+  let y2' = y2 + lightRadius
   let toPoint = SDL.P . fmap fromIntegral
   let drawLine v1 v2 = SDL.drawLine renderer (toPoint v1) (toPoint v2)
-  drawLine (V2 x1 y1) (V2 xVertical y1)
-  drawLine (V2 xVertical y1) (V2 xVertical y2)
-  drawLine (V2 x2 y2) (V2 xVertical y2)
+  drawLine (V2 x1 y1') (V2 xVertical y1')
+  drawLine (V2 xVertical y1') (V2 xVertical y2')
+  drawLine (V2 x2 y2') (V2 xVertical y2')
 
 lightRadius :: (Integral a) => a
 lightRadius = 10
