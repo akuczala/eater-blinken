@@ -4,7 +4,7 @@ module UI
     drawBinary,
     toLastNDigitsBase,
     segmentError,
-    drawConnection
+    drawConnection,
   )
 where
 

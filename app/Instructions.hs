@@ -10,7 +10,7 @@ module Instructions
     getInstructionAddress,
     getMicroInstructions,
     inputFlags,
-    outputFlags
+    outputFlags,
   )
 where
 
@@ -39,23 +39,23 @@ data ControlSignal
   deriving (Show, Eq)
 
 inputFlags :: [ControlSignal]
-inputFlags = [
-  ARegisterIn,
-  BRegisterIn,
-  OutRegisterIn,
-  MemoryAddressIn,
-  RAMIn,
-  InstructionRegisterIn,
-  JumpSignal,
-  FlagRegisterIn
+inputFlags =
+  [ ARegisterIn,
+    BRegisterIn,
+    OutRegisterIn,
+    MemoryAddressIn,
+    RAMIn,
+    InstructionRegisterIn,
+    JumpSignal,
+    FlagRegisterIn
   ]
 
 outputFlags :: [ControlSignal]
-outputFlags = [
-  ARegisterOut,
-  CounterOut,
-  RAMOut,
-  InstructionRegisterOut
+outputFlags =
+  [ ARegisterOut,
+    CounterOut,
+    RAMOut,
+    InstructionRegisterOut
   ]
 
 data Instruction

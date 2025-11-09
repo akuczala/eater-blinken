@@ -2,10 +2,10 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Visual where
+module Visual(main) where
 
 import Colors
-import Control.Monad (when, zipWithM_)
+import Control.Monad (when, zipWithM_, forM_)
 import Control.Monad.IO.Class (MonadIO)
 import Cpu
 import Data.Maybe (fromMaybe)
@@ -22,8 +22,8 @@ import Signals (clock)
 import UI
 import Data.Word (Word8)
 
-test :: IO ()
-test = do
+main :: IO ()
+main = do
   sdlApp firstSample handleSDLEvents output signal
 
 signal :: SF Frame (Frame, Bool, CPUState)
@@ -111,12 +111,8 @@ drawUIElement renderer cpuState e = case e of
     drawBinary renderer pos bitBoxSize n (f cpuState)
   ControlLight pos writeSignal readSignal -> do
     let enabled cs = cs `elem` cpuMicro cpuState
-    case writeSignal of
-      (Just cs) -> drawLight renderer pos red (enabled cs)
-      _ -> pure ()
-    case readSignal of
-      (Just cs) -> drawLight renderer pos green (enabled cs)
-      _ -> pure ()
+    forM_ writeSignal $ drawLight renderer pos red . enabled
+    forM_ readSignal $ drawLight renderer pos green . enabled
   BitLight color pos f -> drawLight renderer pos color (f cpuState)
   SegmentDisplay color pos n mode f -> drawDigitDisplay
           (drawSegments renderer color)
@@ -173,51 +169,31 @@ memoryElements addrPos = let
   SegmentDisplay green (memPos + V2 0 (bitBoxSize * 2)) 2 HexMode cpuMemory
   ]
 
+instructionElements :: Pos -> [UIElement]
+instructionElements pos = [
+  BinaryLights blue pos 4 ((`div` 16) . cpuInstruction),
+  BinaryLights yellow (pos + V2 ((bitBoxSize + 5) * 4) 0) 4 cpuInstruction,
+  ControlLight (pos + dotOffset) (Just InstructionRegisterIn) (Just InstructionRegisterOut)
+  ]
+
+counterElements :: Pos -> [UIElement]
+counterElements pos = [
+  BinaryLights green pos 4 cpuCounter,
+  BinaryLights blue (pos + V2 ((bitBoxSize + 5) * 4) 0) 3 cpuMicroCounter,
+  ControlLight (pos + dotOffset) (Just JumpSignal) (Just CounterOut)
+  ]
+
 drawBlinkenlights :: Renderer -> CPUState -> IO ()
 drawBlinkenlights renderer cpuState = do
-  let enabled controlSignal = controlSignal `elem` cpuMicro cpuState
-  let drawTemp elmts pos = mapM_ (drawUIElement renderer cpuState) (elmts pos)
-
-  let drawBus = drawTemp busElements
-  let drawAlu = drawTemp aluElements
-  let drawFlags = drawTemp flagElements
-  let drawOut = drawTemp outElements
-  let drawMemory = drawTemp memoryElements
-
-  let drawInstruction pos = do
-        -- upper 4 instruction
-        SDL.rendererDrawColor renderer $= blue
-        drawBinary renderer pos bitBoxSize 4 (cpuInstruction cpuState `div` 16)
-
-        -- lower 4 instruction
-
-        SDL.rendererDrawColor renderer $= yellow
-        drawBinary renderer (pos + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 4 (cpuInstruction cpuState)
-
-        drawLight renderer (pos + dotOffset) red (enabled InstructionRegisterIn)
-        drawLight renderer (pos + dotOffset) green (enabled InstructionRegisterOut)
-
-  let drawCounter pos = do
-        -- program counter
-        SDL.rendererDrawColor renderer $= green
-        drawBinary renderer pos bitBoxSize 4 (cpuCounter cpuState)
-
-        drawLight renderer (pos + dotOffset) green (enabled CounterOut)
-        drawLight renderer (pos + dotOffset) red (enabled JumpSignal)
-
-        -- micro counter
-        SDL.rendererDrawColor renderer $= blue
-        drawBinary renderer (pos + V2 ((fromIntegral bitBoxSize + 5) * 4) 0) bitBoxSize 3 (cpuMicroCounter cpuState)
-
   do
     let gridPoints = fmap round . (+ V2 50 50) . (* V2 800 600) <$> mkGrid 3 3
-    let f i draw = draw (gridPoints V.! i)
-    let blank _ = pure ()
+    let draw i elmts = mapM_ (drawUIElement renderer cpuState) (elmts (gridPoints V.! i))
+    let blank _ = []
 {- ORMOLU_DISABLE -}
-    zipWithM_ f [0..] [
-      blank,      drawBus,         drawCounter,
-      drawMemory, drawFlags,       drawAlu,
-      blank,      drawInstruction, drawOut
+    zipWithM_ draw [0..] [
+      blank,          busElements,         counterElements,
+      memoryElements, flagElements,        aluElements,
+      blank,          instructionElements, outElements
       ]
 {- ORMOLU_ENABLE -}
   SDL.rendererDrawColor renderer $= cyan

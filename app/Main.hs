@@ -2,7 +2,7 @@ module Main where
 
 import FRP.Yampa
 import Text.Printf (printf)
-import Visual (test)
+import qualified Visual (main)
 
 -- signal :: SF a Int
 -- signal = proc x -> do
@@ -44,4 +44,5 @@ showWithTime f (t, a) = showTime t <> ": " <> f a
 -- test = do
 --   putStr . unlines . fmap (showWithTime show) $ embed (time &&& cpuSignal) $ deltaEncode 0.5 (replicate 400 False)
 
-main = test
+main :: IO ()
+main = Visual.main
