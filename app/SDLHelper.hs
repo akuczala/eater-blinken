@@ -15,7 +15,7 @@ sdlApp ::
   IO ()
 sdlApp firstSample eventHandler output signal = do
   SDL.initializeAll
-  window <- SDL.createWindow "My SDL Application" SDL.defaultWindow
+  window <- SDL.createWindow "Eater blinken" SDL.defaultWindow
   renderer <- SDL.createRenderer window (-1) SDL.defaultRenderer
 
   t <- SDL.time
