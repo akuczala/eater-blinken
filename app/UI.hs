@@ -4,6 +4,7 @@ module UI
     drawBinary,
     toLastNDigitsBase,
     segmentError,
+    drawConnection
   )
 where
 
@@ -102,15 +103,23 @@ drawBinary renderer p0 size nBits n = mapM_ drawBit [0 .. nBits - 1]
         SDL.Rectangle (SDL.P $ fromIntegral <$> p0 + V2 (((nBits - 1) - i) * (fromIntegral size + 5)) 0) (V2 size size)
 
 -- > vibe coded
-toLastNDigitsBase :: (Integral a) => a -> Int -> a -> Maybe [a]
+toLastNDigitsBase :: (Integral a, Integral b) => a -> Int -> a -> Maybe [b]
 toLastNDigitsBase base width n
   | base < 2 = Nothing
   | width < 0 = Nothing
   | n < 0 = Nothing
-  | otherwise = Just $ go width n []
+  | otherwise = Just . fmap fromIntegral $ go width (fromIntegral n) []
   where
     go steps x acc
       | steps <= 0 = acc
       | otherwise = go (steps - 1) (x `div` base) ((x `mod` base) : acc)
 
 -- <
+
+drawConnection :: Renderer -> Int -> V2 Int -> V2 Int -> IO ()
+drawConnection renderer xVertical (V2 x1 y1) (V2 x2 y2) = do
+  let toPoint = SDL.P . fmap fromIntegral
+  let drawLine v1 v2 = SDL.drawLine renderer (toPoint v1) (toPoint v2)
+  drawLine (V2 x1 y1) (V2 xVertical y1)
+  drawLine (V2 xVertical y1) (V2 xVertical y2)
+  drawLine (V2 x2 y2) (V2 xVertical y2)

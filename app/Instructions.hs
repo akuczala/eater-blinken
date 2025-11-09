@@ -9,6 +9,8 @@ module Instructions
     decodeInstruction,
     getInstructionAddress,
     getMicroInstructions,
+    inputFlags,
+    outputFlags
   )
 where
 
@@ -35,6 +37,26 @@ data ControlSignal
   | JumpSignal
   | FlagRegisterIn
   deriving (Show, Eq)
+
+inputFlags :: [ControlSignal]
+inputFlags = [
+  ARegisterIn,
+  BRegisterIn,
+  OutRegisterIn,
+  MemoryAddressIn,
+  RAMIn,
+  InstructionRegisterIn,
+  JumpSignal,
+  FlagRegisterIn
+  ]
+
+outputFlags :: [ControlSignal]
+outputFlags = [
+  ARegisterOut,
+  CounterOut,
+  RAMOut,
+  InstructionRegisterOut
+  ]
 
 data Instruction
   = LoadA Address
