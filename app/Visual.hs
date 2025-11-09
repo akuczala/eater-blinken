@@ -2,13 +2,12 @@
 {-# LANGUAGE LinearTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Visual(main) where
+module Visual (main) where
 
 import Colors
-import Control.Monad (when, zipWithM_, forM_)
+import Control.Monad (when, zipWithM_)
 import Control.Monad.IO.Class (MonadIO)
 import Cpu
-import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
 import FRP.Yampa (SF, returnA)
 import Foreign.C (CInt)
@@ -16,11 +15,9 @@ import Instructions
 import Programs
 import SDL (Renderer, V2 (..), ($=))
 import qualified SDL
-import qualified SDL.Primitive
 import SDLHelper (handleKeyEvent, sdlApp)
 import Signals (clock)
 import UI
-import Data.Word (Word8)
 
 main :: IO ()
 main = do
@@ -73,131 +70,81 @@ mkGrid m n =
       i <- fromIntegral <$> [0 .. m - 1]
     ]
 
-lightRadius :: (Integral a) => a
-lightRadius = 10
-
-bitBoxSize :: (Integral a) => a
-bitBoxSize = 20
-
-digitScale :: (Integral a) => a
-digitScale = 32
-
-drawLight :: Renderer -> V2 Int -> Color -> Bool -> IO ()
-drawLight renderer pos color enable = do
-  SDL.Primitive.circle renderer (fromIntegral <$> pos) lightRadius white
-  when enable $
-    SDL.Primitive.fillCircle renderer (fromIntegral <$> pos) lightRadius color
-
-type Pos = V2 Int
-
-data DigitMode = DecMode | HexMode
-digitModeToBase :: DigitMode -> Int
-digitModeToBase mode = case mode of
-  DecMode -> 10
-  HexMode -> 16
-
-data UIElementF a
-  = BinaryLights Color Pos Int (a -> Word8)
-  | ControlLight Pos (Maybe ControlSignal) (Maybe ControlSignal) -- write, read
-  | BitLight Color Pos (a -> Bool)
-  | SegmentDisplay Color Pos Int DigitMode (a -> Word8)
-
-type UIElement = UIElementF CPUState
-
-drawUIElement :: Renderer -> CPUState -> UIElement -> IO ()
-drawUIElement renderer cpuState e = case e of
-  BinaryLights color pos n f -> do
-    SDL.rendererDrawColor renderer $= color
-    drawBinary renderer pos bitBoxSize n (f cpuState)
-  ControlLight pos writeSignal readSignal -> do
-    let enabled cs = cs `elem` cpuMicro cpuState
-    forM_ writeSignal $ drawLight renderer pos red . enabled
-    forM_ readSignal $ drawLight renderer pos green . enabled
-  BitLight color pos f -> drawLight renderer pos color (f cpuState)
-  SegmentDisplay color pos n mode f -> drawDigitDisplay
-          (drawSegments renderer color)
-          (pure digitScale)
-          pos
-          (fromMaybe [segmentError] $ toLastNDigitsBase (digitModeToBase mode) n (fromIntegral $ f cpuState))
-
 dotOffset :: V2 Int
-dotOffset = V2 (-25) 10
+dotOffset = V2 (-25) 0
 
 busElements :: Pos -> [UIElement]
-busElements p = [
-  BinaryLights cyan p 8 cpuBus
+busElements p =
+  [ BinaryLights cyan p 8 cpuBus
   ]
 
 aluElements :: Pos -> [UIElement]
-aluElements aluPos = let
-  aPos = aluPos + V2 0 (-60)
-  bPos = aluPos + V2 0 60
-  in
-    [
-      BinaryLights red aPos 8 cpuA,
-      BinaryLights orange bPos 8 cpuB,
-      BinaryLights yellow aluPos 8 cpuAlu,
-
-      ControlLight (aPos + dotOffset) (Just ARegisterIn) (Just ARegisterOut),
-      ControlLight (bPos + dotOffset) (Just BRegisterIn) Nothing,
-      ControlLight (aluPos + dotOffset) Nothing (Just ALUOut),
-      BitLight blue (((`div` 2) <$> aluPos + bPos) + dotOffset) (\s -> Subtract `elem` cpuMicro s)
+aluElements aluPos =
+  let aPos = aluPos + V2 0 (-60)
+      bPos = aluPos + V2 0 60
+   in [ BinaryLights red aPos 8 cpuA,
+        BinaryLights orange bPos 8 cpuB,
+        BinaryLights yellow aluPos 8 cpuAlu,
+        ControlLight (aPos + dotOffset) (Just ARegisterIn) (Just ARegisterOut),
+        ControlLight (bPos + dotOffset) (Just BRegisterIn) Nothing,
+        ControlLight (aluPos + dotOffset) Nothing (Just ALUOut),
+        BitLight blue (((`div` 2) <$> aluPos + bPos) + dotOffset) (\s -> Subtract `elem` cpuMicro s)
       ]
 
 flagElements :: Pos -> [UIElement]
-flagElements pos = [
-  BinaryLights magenta pos 2 (encodeFlags . cpuFlags),
-  ControlLight (pos + dotOffset) (Just FlagRegisterIn) Nothing
+flagElements pos =
+  [ BinaryLights magenta pos 2 (encodeFlags . cpuFlags),
+    ControlLight (pos + dotOffset) (Just FlagRegisterIn) Nothing
   ]
 
 outElements :: Pos -> [UIElement]
-outElements pos = [
-  BinaryLights white pos 8 cpuOut,
-  ControlLight (pos + dotOffset) (Just OutRegisterIn) Nothing,
-  SegmentDisplay cyan (pos + V2 0 (bitBoxSize * 2)) 3 DecMode cpuOut
+outElements pos =
+  [ BinaryLights white pos 8 cpuOut,
+    ControlLight (pos + dotOffset) (Just OutRegisterIn) Nothing,
+    SegmentDisplay cyan (pos + V2 0 (bitBoxSize * 2)) 3 DecMode cpuOut
   ]
 
 memoryElements :: Pos -> [UIElement]
-memoryElements addrPos = let
-    memPos = addrPos + V2 0 60
-  in [
-  BinaryLights yellow addrPos 4 cpuAddr,
-  ControlLight (addrPos + dotOffset) (Just MemoryAddressIn) Nothing,
-
-  BinaryLights green memPos 8 cpuMemory,
-  ControlLight (memPos + dotOffset) (Just RAMIn) (Just RAMOut),
-  SegmentDisplay green (memPos + V2 0 (bitBoxSize * 2)) 2 HexMode cpuMemory
-  ]
+memoryElements addrPos =
+  let memPos = addrPos + V2 0 60
+   in [ BinaryLights yellow addrPos 4 cpuAddr,
+        ControlLight (addrPos + dotOffset) (Just MemoryAddressIn) Nothing,
+        BinaryLights green memPos 8 cpuMemory,
+        ControlLight (memPos + dotOffset) (Just RAMIn) (Just RAMOut),
+        SegmentDisplay green (memPos + V2 0 (bitBoxSize * 2)) 2 HexMode cpuMemory
+      ]
 
 instructionElements :: Pos -> [UIElement]
-instructionElements pos = [
-  BinaryLights blue pos 4 ((`div` 16) . cpuInstruction),
-  BinaryLights yellow (pos + V2 ((bitBoxSize + 5) * 4) 0) 4 cpuInstruction,
-  ControlLight (pos + dotOffset) (Just InstructionRegisterIn) (Just InstructionRegisterOut)
+instructionElements pos =
+  [ BinaryLights blue pos 4 ((`div` 16) . cpuInstruction),
+    BinaryLights yellow (pos + V2 ((bitBoxSize + 5) * 4) 0) 4 cpuInstruction,
+    ControlLight (pos + dotOffset) (Just InstructionRegisterIn) (Just InstructionRegisterOut)
   ]
 
 counterElements :: Pos -> [UIElement]
-counterElements pos = [
-  BinaryLights green pos 4 cpuCounter,
-  BinaryLights blue (pos + V2 ((bitBoxSize + 5) * 4) 0) 3 cpuMicroCounter,
-  ControlLight (pos + dotOffset) (Just JumpSignal) (Just CounterOut)
+counterElements pos =
+  [ BinaryLights green pos 4 cpuCounter,
+    BinaryLights blue (pos + V2 ((bitBoxSize + 5) * 4) 0) 3 cpuMicroCounter,
+    ControlLight (pos + dotOffset) (Just JumpSignal) (Just CounterOut)
   ]
 
+{- ORMOLU_DISABLE -}
 drawBlinkenlights :: Renderer -> CPUState -> IO ()
 drawBlinkenlights renderer cpuState = do
   do
     let gridPoints = fmap round . (+ V2 50 50) . (* V2 800 600) <$> mkGrid 3 3
     let draw i elmts = mapM_ (drawUIElement renderer cpuState) (elmts (gridPoints V.! i))
     let blank _ = []
-{- ORMOLU_DISABLE -}
-    zipWithM_ draw [0..] [
-      blank,          busElements,         counterElements,
-      memoryElements, flagElements,        aluElements,
-      blank,          instructionElements, outElements
-      ]
-{- ORMOLU_ENABLE -}
+    let elements = [
+    
+          blank,          busElements,         counterElements,
+          memoryElements, flagElements,        aluElements,
+          blank,          instructionElements, outElements
+          ]
+    zipWithM_ draw [0..] elements
   SDL.rendererDrawColor renderer $= cyan
   drawConnection renderer 400 (V2 100 100) (V2 500 500)
+{- ORMOLU_ENABLE -}
 
 handleSDLEvents :: (MonadIO m) => m (Maybe Frame)
 handleSDLEvents = do

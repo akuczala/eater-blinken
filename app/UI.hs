@@ -1,24 +1,28 @@
 module UI
-  ( drawSegments,
-    drawDigitDisplay,
-    drawBinary,
-    toLastNDigitsBase,
-    segmentError,
-    drawConnection,
+  ( drawConnection,
+    drawUIElement,
+    Pos,
+    UIElementF (..),
+    UIElement,
+    DigitMode (..),
+    bitBoxSize,
   )
 where
 
 import Colors
-import Control.Monad (when, zipWithM_)
+import Control.Monad (forM_, when, zipWithM_)
+import Cpu (CPUState (..))
 import Data.Bifunctor (Bifunctor, bimap)
 import Data.Bits (Bits, testBit)
+import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as VS
 import Data.Word (Word8)
 import Foreign.C (CInt)
-import SDL (Renderer, V2 (..))
+import Instructions (ControlSignal)
+import SDL (Renderer, V2 (..), ($=))
 import qualified SDL
-import SDL.Primitive (fillPolygon)
+import qualified SDL.Primitive
 import Signals (Data)
 
 segmentError :: (Integral a) => a
@@ -123,3 +127,53 @@ drawConnection renderer xVertical (V2 x1 y1) (V2 x2 y2) = do
   drawLine (V2 x1 y1) (V2 xVertical y1)
   drawLine (V2 xVertical y1) (V2 xVertical y2)
   drawLine (V2 x2 y2) (V2 xVertical y2)
+
+lightRadius :: (Integral a) => a
+lightRadius = 10
+
+bitBoxSize :: (Integral a) => a
+bitBoxSize = 20
+
+digitScale :: (Integral a) => a
+digitScale = 32
+
+drawLight :: Renderer -> V2 Int -> Color -> Bool -> IO ()
+drawLight renderer pos color enable = do
+  SDL.Primitive.circle renderer (fromIntegral <$> pos) lightRadius white
+  when enable $
+    SDL.Primitive.fillCircle renderer (fromIntegral <$> pos) lightRadius color
+
+type Pos = V2 Int
+
+data DigitMode = DecMode | HexMode
+
+digitModeToBase :: DigitMode -> Int
+digitModeToBase mode = case mode of
+  DecMode -> 10
+  HexMode -> 16
+
+data UIElementF a
+  = BinaryLights Color Pos Int (a -> Word8)
+  | ControlLight Pos (Maybe ControlSignal) (Maybe ControlSignal) -- write, read
+  | BitLight Color Pos (a -> Bool)
+  | SegmentDisplay Color Pos Int DigitMode (a -> Word8)
+
+type UIElement = UIElementF CPUState
+
+drawUIElement :: Renderer -> CPUState -> UIElement -> IO ()
+drawUIElement renderer cpuState e = case e of
+  BinaryLights color pos n f -> do
+    SDL.rendererDrawColor renderer $= color
+    drawBinary renderer pos bitBoxSize n (f cpuState)
+  ControlLight pos writeSignal readSignal -> do
+    let enabled = (`elem` cpuMicro cpuState)
+    let lightPos = pos + V2 0 (bitBoxSize `div` 2)
+    forM_ writeSignal $ drawLight renderer lightPos red . enabled
+    forM_ readSignal $ drawLight renderer lightPos green . enabled
+  BitLight color pos f -> drawLight renderer pos color (f cpuState)
+  SegmentDisplay color pos n mode f ->
+    drawDigitDisplay
+      (drawSegments renderer color)
+      (pure digitScale)
+      pos
+      (fromMaybe [segmentError] $ toLastNDigitsBase (digitModeToBase mode) n (fromIntegral $ f cpuState))
