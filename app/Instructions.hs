@@ -62,6 +62,7 @@ data Instruction
   = LoadA Address
   | StoreA Address
   | LoadI Address
+  | AddI Address
   | Add Address
   | Sub Address
   | Inc
@@ -78,6 +79,7 @@ data InstructionTag
   = LoadATag
   | StoreATag
   | LoadITag
+  | AddITag
   | AddTag
   | SubTag
   | IncTag
@@ -95,6 +97,7 @@ tagToInstruction t d = case t of
   LoadATag -> LoadA d
   StoreATag -> StoreA d
   LoadITag -> LoadI d
+  AddITag -> AddI d
   AddTag -> Add d
   SubTag -> Sub d
   IncTag -> Inc
@@ -111,6 +114,7 @@ instructionToTag i = case i of
   LoadA a -> (LoadATag, a)
   StoreA a -> (StoreATag, a)
   LoadI a -> (LoadITag, a)
+  AddI a -> (AddITag, a)
   Add a -> (AddTag, a)
   Sub a -> (SubTag, a)
   Inc -> (IncTag, 1)
@@ -210,6 +214,11 @@ getMicroInstructions flags i = case i of
         V.fromList
           [ [InstructionRegisterOut, ARegisterIn]
           ]
+      AddI _ ->
+        V.fromList
+          [ [InstructionRegisterOut, BRegisterIn],
+            [ALUOut, ARegisterIn, FlagRegisterIn]
+          ]
       Sub _ -> subI
       Inc ->
         V.fromList
@@ -222,4 +231,4 @@ getMicroInstructions flags i = case i of
             [ALUOut, ARegisterIn, FlagRegisterIn, Subtract]
           ]
     where
-      jumpInstructions doJump = V.fromList [[InstructionRegisterOut] <> ([JumpSignal | doJump])]
+      jumpInstructions doJump = V.fromList ([[InstructionRegisterOut, JumpSignal] | doJump])

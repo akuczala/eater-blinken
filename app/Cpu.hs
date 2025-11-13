@@ -43,11 +43,10 @@ ram initContents = proc (write, addr, dat) -> do
   where
     f m (a, d) = m V.// [(a, d)]
 
-encodeProgram :: (Address -> Address -> [Instruction]) -> Memory
+encodeProgram :: (Address -> [Instruction]) -> Memory
 encodeProgram program =
-  let programLen = fromIntegral . length $ program 0 0
-      prog = program programLen (programLen + 1)
-   in V.fromList $ (encodeInstruction <$> prog) <> [0, 0]
+  let programLen = fromIntegral . length $ program 0
+   in V.fromList $ (encodeInstruction <$> program programLen) <> [0, 0, 0, 0]
 
 data CPUState = CPUState
   { cpuA :: Data,

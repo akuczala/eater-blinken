@@ -28,8 +28,8 @@ main = do
 signal :: SF Frame (Frame, Bool, CPUState)
 signal = proc frame -> do
   clockEnabled <- fLatch (const . not) False -< (cReleased frame, ())
-  c <- clock 0.1 -< ()
-  s <- cpuSignal (encodeProgram fibProgram) -< (clockEnabled && c || spacePressed frame)
+  c <- clock 0.03 -< ()
+  s <- cpuSignal (encodeProgram (multiplyProgram 13 4)) -< (clockEnabled && c || spacePressed frame)
   returnA -< (frame, c, s)
 
 firstSample :: IO Frame
